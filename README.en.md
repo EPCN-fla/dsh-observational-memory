@@ -61,6 +61,12 @@ Requires deepseek-harness **0.1.5-rc.2** (`@deepseek-ai/dsh-*` packages ≥ 0.1.
 
 Add the plugin to a profile through the DSH CLI (`web` shown here; substitute as needed). The package ships a `cordis.patch.yml`, so the composer mounts the host half automatically and serves `/plugins/dsh-observational-memory/client.js` to the Web client — no extra composition wiring.
 
+### From npm
+
+```sh
+dsh plugin --profile web add dsh-observational-memory
+```
+
 ### From GitHub
 
 ```sh

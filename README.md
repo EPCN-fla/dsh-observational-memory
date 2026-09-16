@@ -61,6 +61,12 @@ flowchart TD
 
 通过 DSH CLI 把插件加入指定的 Profile（这里以 `web` 为例，按需替换）。本包自带 `cordis.patch.yml`，组合器会自动挂载 host 半端，并向 Web 客户端提供 `/plugins/dsh-observational-memory/client.js`——安装后无需额外的组合配置。
 
+### From npm
+
+```sh
+dsh plugin --profile web add dsh-observational-memory
+```
+
 ### From GitHub
 
 ```sh
