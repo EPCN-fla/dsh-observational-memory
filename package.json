@@ -1,0 +1,86 @@
+{
+  "name": "dsh-observational-memory",
+  "version": "0.1.2",
+  "description": "Observational memory for DeepSeek Harness: background observers distill session work into observations and durable reflections, so long sessions survive compaction with their decisions intact.",
+  "license": "MIT",
+  "type": "module",
+  "main": "lib/index.js",
+  "files": [
+    "lib",
+    "src",
+    "cordis.patch.yml",
+    "README.md",
+    "README.en.md"
+  ],
+  "scripts": {
+    "build": "node build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepack": "node build.mjs",
+    "prepare": "node build.mjs"
+  },
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "types": "./src/client/index.tsx",
+      "default": "./lib/client.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-api-session-controller",
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-settings-plugins"
+      ]
+    },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-agent": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-compaction": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-llm": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-session": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-settings": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-tools": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-typert-protocol": "0.1.5-rc.2",
+    "react": "^18.2.0"
+  },
+  "dependencies": {
+    "@deepseek-ai/schemastery": "^3.18.2"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "^4.0.2",
+    "@deepseek-ai/dsh-agent": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-agent-default-model": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-client-ui-primitives": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-compaction": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-llm": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-session": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-settings": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-tools": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-typert-protocol": "^0.1.5-rc.2",
+    "@types/node": "^24.0.0",
+    "@types/react": "^18.3.31",
+    "@types/react-dom": "^18.3.7",
+    "esbuild": "^0.25.0",
+    "happy-dom": "^20.14.5",
+    "lightningcss": "^1.33.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.3.1",
+    "typescript": "^5.8.0",
+    "vitest": "^3.2.4"
+  }
+}

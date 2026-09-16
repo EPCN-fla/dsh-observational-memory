@@ -1,0 +1,6 @@
+# Bundle patch — used by `dsh plugin add <this package>`. Inside an installed
+# bundle the plugin row references the package by name (Node resolution),
+# not by source path.
+- insert:
+    - id: observational-memory
+      name: dsh-observational-memory

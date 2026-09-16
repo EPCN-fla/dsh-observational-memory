@@ -1,0 +1,170 @@
+/* Ported user-bubble chrome (ui-chat's MessageItem/MessageIconActions),
+   self-contained under the bundle-purity gate. The attribute selectors key
+   off data-chat-flow-kind, which the host's ChatNodeSeat publishes. */
+
+.userRow {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.userStack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  min-width: 0;
+  max-width: min(calc(var(--dsh-chat-content-width, 748px) * 0.702), 82%);
+}
+
+.bubble {
+  max-width: 100%;
+  background: var(--dsw-specific-bubble);
+  border-radius: 22px;
+  padding: 10px 16px;
+  font-size: var(--dsh-content-font-size, 14px);
+  line-height: calc(22px + var(--dsh-content-font-delta, 0px));
+  color: var(--dsw-alias-label-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.referenceSummary {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: var(--dsh-content-font-size-secondary, 13px);
+  line-height: calc(18px + var(--dsh-content-font-delta-secondary, 0px));
+}
+
+.attachmentRow {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  max-width: 100%;
+  gap: 8px;
+}
+
+.fileCard {
+  display: inline-flex;
+  flex: 0 0 240px;
+  align-items: center;
+  gap: 10px;
+  width: 240px;
+  min-height: 64px;
+  padding: 8px 12px;
+  border: 0.5px solid var(--dsw-alias-border-l2, rgba(0, 0, 0, 0.12));
+  border-radius: 16px;
+  background: var(--dsw-specific-input-major, transparent);
+  box-sizing: border-box;
+}
+
+.fileIcon {
+  flex: none;
+  width: 28px;
+  height: 28px;
+}
+
+.fileContent {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.fileName {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--dsw-alias-label-primary);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 22px;
+}
+
+.fileMeta {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--dsw-alias-label-tertiary, rgba(0, 0, 0, 0.45));
+  font-size: 12px;
+  line-height: 15px;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: calc(28px + var(--dsh-content-font-delta, 0px));
+}
+
+/* Earlier user rows reveal the actions on hover/focus-within, matching the
+   shipped behavior; devices without hover keep every row visible. */
+@media (hover: hover) {
+  :is([data-chat-flow-kind='user'], [data-chat-flow-kind='steering']):has(
+    ~ :is([data-chat-flow-kind='user'], [data-chat-flow-kind='steering'])
+  ) .actions {
+    opacity: 0;
+    transition: opacity 80ms ease;
+  }
+
+  :is([data-chat-flow-kind='user'], [data-chat-flow-kind='steering']):has(
+    ~ :is([data-chat-flow-kind='user'], [data-chat-flow-kind='steering'])
+  ):hover .actions,
+  :is([data-chat-flow-kind='user'], [data-chat-flow-kind='steering']):has(
+    ~ :is([data-chat-flow-kind='user'], [data-chat-flow-kind='steering'])
+  ):focus-within .actions {
+    opacity: 1;
+  }
+}
+
+.timeStart {
+  padding-right: 12px;
+  font-size: var(--dsh-content-font-size-secondary, 13px);
+  line-height: calc(24px + var(--dsh-content-font-delta, 0px));
+  color: var(--dsw-alias-label-tertiary);
+  white-space: nowrap;
+}
+
+.action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: calc(28px + var(--dsh-content-font-delta, 0px));
+  height: calc(28px + var(--dsh-content-font-delta, 0px));
+  padding: 6px;
+  border: none;
+  border-radius: 28px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+}
+
+.action svg {
+  width: calc(15px + var(--dsh-content-font-delta, 0px));
+  height: calc(15px + var(--dsh-content-font-delta, 0px));
+}
+
+.action:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-secondary);
+}
+
+/* Unavailable stays focusable and hoverable so the Tooltip can explain why. */
+.action[data-unavailable] {
+  cursor: default;
+  opacity: 0.4;
+}
+
+.action[data-unavailable]:hover {
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}

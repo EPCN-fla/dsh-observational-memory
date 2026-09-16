@@ -1,0 +1,33 @@
+node_modules/
+lib/
+*.tgz
+dist/
+coverage/
+.vitest-cache/
+
+# Reference material (not part of the plugin)
+references/
+
+# Local dev harness home and its runtime artifacts (the fake LLM adapter and
+# the e2e driver stay tracked as dev fixtures)
+.dev/dsh-home/
+.dev/e2e-cwd/
+.dev/*.log
+.dev/*.txt
+.dev/*.html
+.dev/*.json
+.dev/combo.js
+.dev/create.json
+.dev/describe.json
+.dev/inspect.json
+jar.txt
+create.json
+
+# pnpm store leaked by local profile installs
+.pnpm-store/
+
+# npm pack cache (used when $HOME is read-only)
+.npm-cache/
+
+# Local dev patch (copy of cordis.dev.yml.example with machine-specific paths)
+cordis.dev.yml

@@ -1,0 +1,136 @@
+/* Memory view tab chrome: self-contained like the settings card, but every
+   color comes from the --dsw-alias design tokens so skins recolor it. */
+
+.view {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 20px;
+  height: 100%;
+  overflow-y: auto;
+  box-sizing: border-box;
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-bg-layer-1);
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.modeSwitch {
+  display: inline-flex;
+  border: 0.5px solid var(--dsw-alias-border-l2);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.mode,
+.modeActive {
+  border: none;
+  padding: 4px 12px;
+  cursor: pointer;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  font: var(--dsw-font-xxs-12);
+}
+
+.mode:hover {
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.modeActive {
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.mode:focus-visible,
+.modeActive:focus-visible,
+.toolButton:focus-visible {
+  outline: 1px solid var(--dsw-alias-state-business-primary);
+  outline-offset: 1px;
+}
+
+.toolbarActions {
+  display: inline-flex;
+  gap: 8px;
+}
+
+.toolButton {
+  border: 0.5px solid var(--dsw-alias-border-l2);
+  border-radius: 6px;
+  padding: 4px 12px;
+  cursor: pointer;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  font: var(--dsw-font-xxs-12);
+}
+
+.toolButton:hover:not(:disabled) {
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.toolButton:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.updatedAt {
+  margin: 0;
+  color: var(--dsw-alias-label-tertiary);
+  font: var(--dsw-font-xxs-12);
+}
+
+.error {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  color: var(--dsw-alias-state-error-primary);
+  background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 8%, transparent);
+  font: var(--dsw-font-xxs-12);
+}
+
+.sections {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sectionTitle {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.report {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 6px;
+  border: 0.5px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-bg-layer-2);
+  color: var(--dsw-alias-label-primary);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-x: auto;
+  user-select: text;
+}
+
+.empty {
+  margin: 0;
+  color: var(--dsw-alias-label-tertiary);
+  font: var(--dsw-font-xxs-12);
+}

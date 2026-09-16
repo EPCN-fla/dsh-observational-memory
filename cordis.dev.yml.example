@@ -1,0 +1,20 @@
+# Dev patch: disable the installed bundle row and mount the local build output
+# by absolute path under a distinct id (patch id-overrides must keep the same
+# `name`, so a path mount needs its own id), plus the fake LLM adapter and a
+# low compaction threshold so the overflow path is not the only trigger.
+#
+# Copy to cordis.dev.yml (gitignored) and replace the /absolute/path/to
+# placeholders with this checkout's location.
+- id: observational-memory
+  disabled: true
+
+- id: compaction-basic
+  config:
+    thresholdRatio: 0.002
+    retainTokens: 60
+
+- insert:
+    - id: observational-memory-dev
+      name: /absolute/path/to/dsh-observational-memory/lib/index.js
+    - id: om-fake-llm
+      name: /absolute/path/to/dsh-observational-memory/.dev/fake-llm.mjs
