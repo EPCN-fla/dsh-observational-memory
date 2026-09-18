@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -208,6 +208,43 @@ describe('consolidation pipeline', () => {
     const more = [...events, userEvent('extra source text to clear the backoff, deliberately long enough to pass the ten-token gate', events.length)]
     await maybeLaunchConsolidation(ctx, runtime, fakeSession(more))
     expect(warnings.some((m) => m.includes('2 consecutive runs'))).toBe(true)
+  })
+
+  it('reports the consecutive-failure streak in worker error debug events and warnings', async () => {
+    const events = longConversation(20)
+    const { ctx, warnings } = fakeCtx([{ finish: 'error' }])
+    const runtime = new OmRuntime(
+      Config({ observeAfterTokens: 10, reflectAfterTokens: 100_000, debugLog: true, storageDir: dir }),
+      { onError: () => {} },
+    )
+    const session = fakeSession(events)
+
+    await maybeLaunchConsolidation(ctx, runtime, session)
+    await maybeLaunchConsolidation(ctx, runtime, session)
+
+    expect(warnings.filter((m) => m.includes('observer failed'))).toEqual([
+      expect.stringContaining('consecutive failures: 1'),
+      expect.stringContaining('consecutive failures: 2'),
+    ])
+
+    // Debug-log writes are fire-and-forget; poll briefly until both land.
+    const debugPath = join(dir, 'debug', 's1.ndjson')
+    let streaks: number[] = []
+    for (let attempt = 0; attempt < 50 && streaks.length < 2; attempt++) {
+      streaks = await readFile(debugPath, 'utf8')
+        .then((text) =>
+          text
+            .trim()
+            .split('\n')
+            .filter(Boolean)
+            .map((line) => JSON.parse(line) as { event?: string; consecutiveFailures?: number })
+            .filter((entry) => entry.event === 'observer.error')
+            .map((entry) => entry.consecutiveFailures ?? -1),
+        )
+        .catch(() => [] as number[])
+      if (streaks.length < 2) await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    expect(streaks).toEqual([1, 2])
   })
 
   it('suspends the model override after the configured consecutive-failure streak', async () => {

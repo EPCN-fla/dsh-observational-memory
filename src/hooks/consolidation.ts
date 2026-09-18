@@ -123,9 +123,9 @@ export async function runConsolidationPipeline(ctx: Context, runtime: OmRuntime,
   try {
     await runObserverStage(ctx, runtime, session, resolveModel, notify)
   } catch (error) {
-    const message = runtime.recordStageError(sessionId, 'observer', error)
-    runtime.debug(sessionId, 'observer.error', { errorMessage: message })
-    notify('warning', `observer failed: ${message}`)
+    const { message, consecutiveFailures } = runtime.recordStageError(sessionId, 'observer', error)
+    runtime.debug(sessionId, 'observer.error', { errorMessage: message, consecutiveFailures })
+    notify('warning', `observer failed: ${message} (consecutive failures: ${consecutiveFailures})`)
     return
   }
 
@@ -133,18 +133,18 @@ export async function runConsolidationPipeline(ctx: Context, runtime: OmRuntime,
   try {
     reflectorResult = await runReflectorStage(ctx, runtime, session, resolveModel, notify)
   } catch (error) {
-    const message = runtime.recordStageError(sessionId, 'reflector', error)
-    runtime.debug(sessionId, 'reflector.error', { errorMessage: message })
-    notify('warning', `reflector failed: ${message}`)
+    const { message, consecutiveFailures } = runtime.recordStageError(sessionId, 'reflector', error)
+    runtime.debug(sessionId, 'reflector.error', { errorMessage: message, consecutiveFailures })
+    notify('warning', `reflector failed: ${message} (consecutive failures: ${consecutiveFailures})`)
     return
   }
 
   try {
     await runDropperStage(ctx, runtime, session, resolveModel, notify, reflectorResult.reflections, reflectorResult.coverageSeq)
   } catch (error) {
-    const message = runtime.recordStageError(sessionId, 'dropper', error)
-    runtime.debug(sessionId, 'dropper.error', { errorMessage: message })
-    notify('warning', `dropper failed: ${message}`)
+    const { message, consecutiveFailures } = runtime.recordStageError(sessionId, 'dropper', error)
+    runtime.debug(sessionId, 'dropper.error', { errorMessage: message, consecutiveFailures })
+    notify('warning', `dropper failed: ${message} (consecutive failures: ${consecutiveFailures})`)
   }
 }
 

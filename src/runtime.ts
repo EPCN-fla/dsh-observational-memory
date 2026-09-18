@@ -60,11 +60,11 @@ export class OmRuntime {
   /** Sessions already notified about model resolution failure (notify once). */
   readonly resolveFailureNotified = new Set<string>()
   /**
-   * Consecutive worker-run failures per session, the suspension input for a
-   * configured model override. Only counted while an override is configured
-   * (without one, workers already run on the session model); only an
-   * override-path success resets it, so a tripped suspension is sticky within
-   * the current config epoch.
+   * Consecutive worker-run failures per session — the suspension input for a
+   * configured model override, and the streak reported by worker error debug
+   * events. Always counted; reset by an override-path success (or any success
+   * when no override is configured), never by a suspended-override fallback
+   * success, so a tripped suspension is sticky within the current config epoch.
    */
   readonly workerConsecutiveFailures = new Map<string, number>()
   /** Sessions already notified that their model override is suspended (notify once per trip). */
@@ -102,27 +102,33 @@ export class OmRuntime {
     }
   }
 
-  recordStageError(sessionId: string, phase: WorkerPhase, error: unknown): string {
+  /**
+   * Record one worker-stage failure and bump the consecutive-failure streak.
+   * The streak is always counted (it backs the error debug events and worker
+   * notifications, so it stays meaningful without an override); it only FEEDS
+   * override suspension while an override is configured. A later override
+   * adoption passes through setConfig, which starts a fresh config epoch and
+   * clears any streak earned on the session model.
+   */
+  recordStageError(sessionId: string, phase: WorkerPhase, error: unknown): { message: string; consecutiveFailures: number } {
     const message = error instanceof Error ? error.message : String(error)
     if (phase === 'observer') this.lastObserverError.set(sessionId, message)
     if (phase === 'reflector') this.lastReflectorError.set(sessionId, message)
     if (phase === 'dropper') this.lastDropperError.set(sessionId, message)
-    // The streak feeds override suspension, so it only exists while an
-    // override does; without one, workers already run on the session model.
-    if (this._config.model !== undefined) {
-      this.workerConsecutiveFailures.set(sessionId, (this.workerConsecutiveFailures.get(sessionId) ?? 0) + 1)
-    }
-    return message
+    const consecutiveFailures = (this.workerConsecutiveFailures.get(sessionId) ?? 0) + 1
+    this.workerConsecutiveFailures.set(sessionId, consecutiveFailures)
+    return { message, consecutiveFailures }
   }
 
   /**
-   * A worker run completed without a stream failure. Only an override-path
-   * success proves the configured override healthy — it clears the failure
-   * streak (and its suspension notice), re-arming the override; a
-   * session-model fallback success leaves a tripped suspension in place.
+   * A worker run completed without a stream failure. An override-path success
+   * proves the configured override healthy and re-arms it; with no override
+   * configured, any success is the session model working and also resets the
+   * streak. Only a fallback-path success while an override is suspended leaves
+   * the streak (and the suspension) untouched.
    */
   noteWorkerSuccess(sessionId: string, viaOverride: boolean): void {
-    if (!viaOverride) return
+    if (!viaOverride && this._config.model !== undefined) return
     this.workerConsecutiveFailures.delete(sessionId)
     this.overrideSuspensionNotified.delete(sessionId)
   }
