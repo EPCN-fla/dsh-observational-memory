@@ -209,4 +209,139 @@ describe('consolidation pipeline', () => {
     await maybeLaunchConsolidation(ctx, runtime, fakeSession(more))
     expect(warnings.some((m) => m.includes('2 consecutive runs'))).toBe(true)
   })
+
+  it('suspends the model override after the configured consecutive-failure streak', async () => {
+    const events = longConversation(20)
+    const { ctx, requests } = fakeCtx([
+      { finish: 'error' },
+      { finish: 'error' },
+      {
+        toolCalls: [
+          {
+            id: 'c1',
+            name: 'record_observations',
+            arguments: JSON.stringify({
+              observations: [
+                {
+                  timestamp: '2026-01-15 14:30',
+                  content: 'Recovered on the session model.',
+                  relevance: 'medium',
+                  sourceEventSeqs: [0],
+                },
+              ],
+            }),
+          },
+        ],
+      },
+      { text: 'done' },
+    ])
+    const errors: string[] = []
+    const runtime = new OmRuntime(
+      Config({
+        observeAfterTokens: 10,
+        reflectAfterTokens: 100_000,
+        model: { provider: 'ov', id: 'broken' },
+        modelFallbackAfterFailures: 2,
+        storageDir: dir,
+      }),
+      { onError: (m) => void errors.push(m) },
+    )
+    const session = fakeSession(events)
+
+    await maybeLaunchConsolidation(ctx, runtime, session)
+    await maybeLaunchConsolidation(ctx, runtime, session)
+    expect(runtime.lastObserverError.get('s1')).toContain('boom')
+
+    // Streak reached the threshold: the third run resolves the session model
+    // (the fake session's routed request header is p/m) and recovers.
+    await maybeLaunchConsolidation(ctx, runtime, session)
+
+    expect(requests.map((r) => `${r.provider}/${r.model}`)).toEqual(['ov/broken', 'ov/broken', 'p/m', 'p/m'])
+    expect(runtime.store.entries('s1')).toHaveLength(1)
+    expect(errors.filter((m) => m.includes('suspended'))).toHaveLength(1)
+  })
+
+  it('never suspends the override when the failure threshold is 0', async () => {
+    const events = longConversation(20)
+    const { ctx, requests } = fakeCtx([{ finish: 'error' }])
+    const runtime = new OmRuntime(
+      Config({
+        observeAfterTokens: 10,
+        reflectAfterTokens: 100_000,
+        model: { provider: 'ov', id: 'broken' },
+        storageDir: dir,
+      }),
+      { onError: () => {} },
+    )
+    const session = fakeSession(events)
+
+    await maybeLaunchConsolidation(ctx, runtime, session)
+    await maybeLaunchConsolidation(ctx, runtime, session)
+    await maybeLaunchConsolidation(ctx, runtime, session)
+
+    expect(requests.map((r) => `${r.provider}/${r.model}`)).toEqual(['ov/broken', 'ov/broken', 'ov/broken'])
+  })
+
+  it('re-arms the override on an override-path success', async () => {
+    const events = longConversation(20)
+    const record = (seq: number) => ({
+      toolCalls: [
+        {
+          id: `c${seq}`,
+          name: 'record_observations',
+          arguments: JSON.stringify({
+            observations: [
+              {
+                timestamp: '2026-01-15 14:30',
+                content: `recorded at seq ${seq}`,
+                relevance: 'medium',
+                sourceEventSeqs: [seq],
+              },
+            ],
+          }),
+        },
+      ],
+    })
+    const { ctx, requests } = fakeCtx([
+      { finish: 'error' },
+      record(19),
+      { text: 'done' },
+      { finish: 'error' },
+      { finish: 'error' },
+      record(21),
+      { text: 'done' },
+    ])
+    const runtime = new OmRuntime(
+      Config({
+        observeAfterTokens: 10,
+        reflectAfterTokens: 100_000,
+        model: { provider: 'ov', id: 'flaky' },
+        modelFallbackAfterFailures: 2,
+        storageDir: dir,
+      }),
+      { onError: () => {} },
+    )
+
+    // 1st run: fails (streak 1).
+    await maybeLaunchConsolidation(ctx, runtime, fakeSession(events))
+    // 2nd run: override succeeds and records — the streak resets.
+    const events2 = [...events, userEvent('more source text after the first success, deliberately long enough to stay due', events.length)]
+    await maybeLaunchConsolidation(ctx, runtime, fakeSession(events2))
+    // 3rd and 4th runs fail again (streak 1, then 2 → suspension trips).
+    const events3 = [...events2, userEvent('even more source text for another run, deliberately long enough to stay due again', events2.length)]
+    await maybeLaunchConsolidation(ctx, runtime, fakeSession(events3))
+    await maybeLaunchConsolidation(ctx, runtime, fakeSession(events3))
+    // 5th run: suspended, falls back to the session model (p/m).
+    await maybeLaunchConsolidation(ctx, runtime, fakeSession(events3))
+
+    expect(requests.map((r) => `${r.provider}/${r.model}`)).toEqual([
+      'ov/flaky',
+      'ov/flaky',
+      'ov/flaky',
+      'ov/flaky',
+      'ov/flaky',
+      'p/m',
+      'p/m',
+    ])
+  })
 })

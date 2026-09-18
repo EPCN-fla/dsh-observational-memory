@@ -147,6 +147,7 @@ Configuration lives in its own `observational-memory` namespace of the DSH user 
 | `observationsPoolTargetTokens` | half of max | Active observation pool target maintained by the dropper |
 | `agentMaxTurns` | `16` | Tool-call turn cap for one background worker run |
 | `model` | session model | Worker model override: `{ provider, id, reasoningEffort? }`; in the settings card, picked from the models added to DSH via cascading provider → model → reasoning-effort dropdowns |
+| `modelFallbackAfterFailures` | `0` | After this many consecutive memory-worker failures, suspend the model override and fall back to the session model; `0` means never. Applies only when a `model` override is configured; the count restarts on an override-path success, a config change, or a session reload |
 | `showWorkerNotifications` | `true` | Log worker progress to the host log (warnings and errors always log) |
 | `passive` | `false` | Passive mode: disable all proactive background triggers |
 | `debugLog` | `false` | Write per-session NDJSON debug events under the storage directory |

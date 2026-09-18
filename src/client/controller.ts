@@ -215,6 +215,7 @@ export const CARD_FIELDS: FieldDef[] = [
   { key: 'model.provider', kind: 'text' },
   { key: 'model.id', kind: 'text' },
   { key: 'model.reasoningEffort', kind: 'text' },
+  { key: 'modelFallbackAfterFailures', kind: 'number', min: 0 },
 ]
 
 function readPath(source: unknown, key: string): unknown {

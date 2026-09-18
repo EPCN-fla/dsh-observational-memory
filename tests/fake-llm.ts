@@ -37,13 +37,19 @@ export function turnChunks(turn: ScriptedTurn): StreamChunk[] {
  * every request's messages for assertions.
  */
 export function fakeLlmCtx(turns: ScriptedTurn[]) {
-  const requests: { messages: unknown[]; system?: string; tools?: unknown[] }[] = []
+  const requests: { provider?: string; model?: string; messages: unknown[]; system?: string; tools?: unknown[] }[] = []
   let call = 0
   const ctx = {
     llm: {
-      async *stream(options: { messages: unknown[]; system?: string; tools?: unknown[] }) {
+      async *stream(options: { provider?: string; model?: string; messages: unknown[]; system?: string; tools?: unknown[] }) {
         // Snapshot: the worker loop reuses one mutable messages array.
-        requests.push({ messages: [...options.messages], system: options.system, tools: options.tools })
+        requests.push({
+          provider: options.provider,
+          model: options.model,
+          messages: [...options.messages],
+          system: options.system,
+          tools: options.tools,
+        })
         const turn = turns[Math.min(call, turns.length - 1)]
         call++
         for (const chunk of turnChunks(turn)) yield chunk

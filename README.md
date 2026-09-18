@@ -147,6 +147,7 @@ DSH 只能按轮次边界切分会话，因此按钮在以下情况保持禁用�
 | `observationsPoolTargetTokens` | 上限的一半 | 清理器维护的活跃观察池目标 |
 | `agentMaxTurns` | `16` | 后台 worker 单次运行的工具调用轮数上限 |
 | `model` | 会话模型 | 记忆 worker 的模型覆盖：`{ provider, id, reasoningEffort? }`；设置卡片中从 DSH 已添加的模型列表按 提供商 → 模型 → 推理强度 逐级下拉选择 |
+| `modelFallbackAfterFailures` | `0` | 记忆 worker 连续失败这么多次后，挂起模型覆盖并回退到会话模型；`0` 表示永不回退。仅在配置了 `model` 覆盖时生效；override 路径成功、修改配置或会话重载后重新计数 |
 | `showWorkerNotifications` | `true` | 在主机日志记录 worker 进度（警告与错误始终记录） |
 | `passive` | `false` | 被动模式：关闭全部主动后台触发 |
 | `debugLog` | `false` | 在存储目录下写每个会话的 NDJSON 调试事件 |

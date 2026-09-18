@@ -396,6 +396,12 @@ export function ObservationalMemoryCard(props: ObservationalMemoryCardProps) {
             />
           </div>
           {modelInvalid ? <p className={css.invalid}>{t('state.invalidModel')}</p> : null}
+          {renderNumberField({
+            key: 'modelFallbackAfterFailures',
+            labelKey: 'field.modelFallbackAfterFailures',
+            hintKey: 'field.modelFallbackAfterFailuresHint',
+            min: 0,
+          })}
 
           <h4 className={css.section}>{t('section.advanced')}</h4>
           {BOOLEAN_FIELDS.map((field) => (

@@ -59,6 +59,13 @@ export interface Config {
   /** Raw/source token threshold for reflection runs; successful reflection can trigger the dropper. */
   reflectAfterTokens?: number
   /**
+   * Consecutive worker-run failures after which a configured model override is
+   * suspended and workers fall back to the session model; 0 disables the
+   * fallback. Inert without a configured override (workers already use the
+   * session model). A config change or session reload restarts the count.
+   */
+  modelFallbackAfterFailures?: number
+  /**
    * Max estimated tokens serialized into one observer chunk. Unset derives
    * from the resolved memory model's context window (20%, min 256, fallback
    * 60,000).
@@ -97,6 +104,7 @@ export interface Config {
 export interface ResolvedConfig {
   observeAfterTokens: number
   reflectAfterTokens: number
+  modelFallbackAfterFailures: number
   observerChunkMaxTokens?: number
   compactAfterTokens: number
   compactAfterTokensMode: CompactAfterTokensMode
@@ -120,6 +128,7 @@ const modelSchema = z.object({
 export const Config: z<Config> = z.object({
   observeAfterTokens: z.number().step(1).min(1).default(10_000),
   reflectAfterTokens: z.number().step(1).min(1).default(20_000),
+  modelFallbackAfterFailures: z.number().step(1).min(0).default(0),
   observerChunkMaxTokens: z.number().step(1).min(256),
   compactAfterTokens: z.number().step(1).min(0).default(0),
   compactAfterTokensMode: z.union(['calibrated', 'ratio'] as const).default('calibrated'),

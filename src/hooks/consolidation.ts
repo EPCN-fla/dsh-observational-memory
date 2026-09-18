@@ -195,8 +195,16 @@ async function runObserverStage(
   const priorReflections = memory.reflections.map(reflectionToSummaryLine)
   const priorObservations = memory.observations.map(observationToSummaryLine)
 
-  notify('info', `observer running on ~${chunkTokens.toLocaleString()}-token chunk`)
-  runtime.debug(sessionId, 'observer.start', { tokens, chunkTokens, coversUpToSeq, sourceEventSeqs })
+  notify('info', `observer running on ~${chunkTokens.toLocaleString()}-token chunk via ${resolved.target.provider}/${resolved.target.model}`)
+  runtime.debug(sessionId, 'observer.start', {
+    tokens,
+    chunkTokens,
+    coversUpToSeq,
+    sourceEventSeqs,
+    provider: resolved.target.provider,
+    model: resolved.target.model,
+    viaOverride: resolved.viaOverride,
+  })
 
   const observations = await runObserver(ctx, {
     target: resolved.target,
@@ -206,6 +214,9 @@ async function runObserverStage(
     allowedSourceEventSeqs: sourceEventSeqs,
     maxTurns: config.agentMaxTurns,
   })
+  // The model call itself settled: an override-path success re-arms a
+  // suspended override, whatever the verdict.
+  runtime.noteWorkerSuccess(sessionId, resolved.viaOverride)
 
   if (!observations || observations.length === 0) {
     runtime.observerEmptyBackoff.set(sessionId, { coverageSeq, tokensAtEmpty: tokens })
@@ -259,6 +270,7 @@ async function runReflectorStage(
     observations: folded.activeObservations,
     maxTurns: config.agentMaxTurns,
   })
+  runtime.noteWorkerSuccess(sessionId, resolved.viaOverride)
   if (!reflections || reflections.length === 0) return { reflections: [] }
 
   const record = buildReflectionsRecorded(reflections, observationCoverageSeq)
@@ -325,6 +337,7 @@ async function runDropperStage(
     targetTokens,
     maxTurns: config.agentMaxTurns,
   })
+  runtime.noteWorkerSuccess(sessionId, resolved.viaOverride)
 
   const coversUpToSeq = earlierSeq(observationCoverageSeq, sameRunReflectionCoverageSeq)
   const record = coversUpToSeq !== undefined && droppedIds ? buildObservationsDropped(droppedIds, coversUpToSeq) : undefined

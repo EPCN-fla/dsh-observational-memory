@@ -14,7 +14,18 @@ import type { WorkerModelTarget } from './workers/observer.ts'
 export type WorkerPhase = 'observer' | 'reflector' | 'dropper'
 
 export type ResolveResult =
-  | { ok: true; target: WorkerModelTarget; contextWindow?: number }
+  | {
+      ok: true
+      target: WorkerModelTarget
+      contextWindow?: number
+      /**
+       * Whether the target came from the configured worker-model override
+       * (false: session-routed model, agent options, or the global default —
+       * including every suspension/resolution fallback). Only an override-path
+       * success re-arms the override after failures.
+       */
+      viaOverride: boolean
+    }
   | { ok: false; reason: string }
 
 /** Deliberate-empty observer backoff state for one session. */
@@ -48,6 +59,16 @@ export class OmRuntime {
   readonly observerEmptyBackoff = new Map<string, EmptyBackoff>()
   /** Sessions already notified about model resolution failure (notify once). */
   readonly resolveFailureNotified = new Set<string>()
+  /**
+   * Consecutive worker-run failures per session, the suspension input for a
+   * configured model override. Only counted while an override is configured
+   * (without one, workers already run on the session model); only an
+   * override-path success resets it, so a tripped suspension is sticky within
+   * the current config epoch.
+   */
+  readonly workerConsecutiveFailures = new Map<string, number>()
+  /** Sessions already notified that their model override is suspended (notify once per trip). */
+  readonly overrideSuspensionNotified = new Set<string>()
   /** Consecutive deliberate-empty observer verdicts per session (warns from the 2nd on). */
   readonly observerConsecutiveEmpties = new Map<string, number>()
 
@@ -72,6 +93,10 @@ export class OmRuntime {
     const next = resolveConfig(config)
     const nextRoot = storageRoot(next)
     this._config = next
+    // A config change re-arms the worker-model override: failure streaks and
+    // suspension notices belong to the previous config epoch.
+    this.workerConsecutiveFailures.clear()
+    this.overrideSuspensionNotified.clear()
     if (nextRoot !== previousRoot) {
       this._store = new LedgerStore(nextRoot, { onError: this.onError })
     }
@@ -82,7 +107,24 @@ export class OmRuntime {
     if (phase === 'observer') this.lastObserverError.set(sessionId, message)
     if (phase === 'reflector') this.lastReflectorError.set(sessionId, message)
     if (phase === 'dropper') this.lastDropperError.set(sessionId, message)
+    // The streak feeds override suspension, so it only exists while an
+    // override does; without one, workers already run on the session model.
+    if (this._config.model !== undefined) {
+      this.workerConsecutiveFailures.set(sessionId, (this.workerConsecutiveFailures.get(sessionId) ?? 0) + 1)
+    }
     return message
+  }
+
+  /**
+   * A worker run completed without a stream failure. Only an override-path
+   * success proves the configured override healthy — it clears the failure
+   * streak (and its suspension notice), re-arming the override; a
+   * session-model fallback success leaves a tripped suspension in place.
+   */
+  noteWorkerSuccess(sessionId: string, viaOverride: boolean): void {
+    if (!viaOverride) return
+    this.workerConsecutiveFailures.delete(sessionId)
+    this.overrideSuspensionNotified.delete(sessionId)
   }
 
   /** One more consecutive deliberate-empty observer verdict; returns the streak. */
@@ -123,6 +165,8 @@ export class OmRuntime {
     this.clearStageErrors(sessionId)
     this.observerEmptyBackoff.delete(sessionId)
     this.resolveFailureNotified.delete(sessionId)
+    this.workerConsecutiveFailures.delete(sessionId)
+    this.overrideSuspensionNotified.delete(sessionId)
     this.observerConsecutiveEmpties.delete(sessionId)
     this.compactInFlight.delete(sessionId)
     this.consolidationInFlight.delete(sessionId)
@@ -167,7 +211,26 @@ export class OmRuntime {
           ? { provider: agent.options.provider, model: agent.options.model, reasoningEffort: agent.options.reasoningEffort }
           : defaultSelection(ctx)
 
-    const target = configured
+    // Suspension: once a configured override has failed
+    // `modelFallbackAfterFailures` consecutive worker runs, it stops being
+    // offered and the session/default model takes over (0 disables the
+    // mechanism). Sticky within the config epoch: only an override-path
+    // success, a config change, or a session reload re-arms it.
+    const threshold = this._config.modelFallbackAfterFailures
+    const suspended =
+      configured !== undefined
+      && threshold > 0
+      && (this.workerConsecutiveFailures.get(session.id) ?? 0) >= threshold
+    if (suspended && configured && !this.overrideSuspensionNotified.has(session.id)) {
+      this.overrideSuspensionNotified.add(session.id)
+      this.onError(
+        `observational-memory: worker model ${configured.provider}/${configured.id} suspended for session ${session.id} `
+        + `after ${threshold} consecutive failure(s); falling back to the session model`,
+      )
+    }
+
+    const viaOverride = configured !== undefined && !suspended
+    const target = viaOverride && configured
       ? { provider: configured.provider, model: configured.id, reasoningEffort: configured.reasoningEffort }
       : fallback
     if (!target) {
@@ -179,10 +242,10 @@ export class OmRuntime {
 
     try {
       const info = await ctx.llm.resolveModelInfo(target.provider, target.model)
-      return { ok: true, target, contextWindow: info.context?.contextWindow }
+      return { ok: true, target, contextWindow: info.context?.contextWindow, viaOverride }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      if (!configured || !fallback) return { ok: false, reason: message }
+      if (!viaOverride || !configured || !fallback) return { ok: false, reason: message }
       // A configured override that does not resolve falls back to the
       // session/default target rather than disabling memory work.
       this.onError(
@@ -190,7 +253,7 @@ export class OmRuntime {
       )
       try {
         const info = await ctx.llm.resolveModelInfo(fallback.provider, fallback.model)
-        return { ok: true, target: fallback, contextWindow: info.context?.contextWindow }
+        return { ok: true, target: fallback, contextWindow: info.context?.contextWindow, viaOverride: false }
       } catch (fallbackError) {
         return { ok: false, reason: fallbackError instanceof Error ? fallbackError.message : String(fallbackError) }
       }
