@@ -48,6 +48,8 @@ export class OmRuntime {
   readonly observerEmptyBackoff = new Map<string, EmptyBackoff>()
   /** Sessions already notified about model resolution failure (notify once). */
   readonly resolveFailureNotified = new Set<string>()
+  /** Consecutive deliberate-empty observer verdicts per session (warns from the 2nd on). */
+  readonly observerConsecutiveEmpties = new Map<string, number>()
 
   constructor(initialConfig: Config, hooks: { onError: (message: string) => void }) {
     this._config = resolveConfig(initialConfig)
@@ -83,6 +85,18 @@ export class OmRuntime {
     return message
   }
 
+  /** One more consecutive deliberate-empty observer verdict; returns the streak. */
+  noteObserverEmpty(sessionId: string): number {
+    const streak = (this.observerConsecutiveEmpties.get(sessionId) ?? 0) + 1
+    this.observerConsecutiveEmpties.set(sessionId, streak)
+    return streak
+  }
+
+  /** Reset the empty-verdict streak after an observer run that recorded. */
+  clearObserverEmpties(sessionId: string): void {
+    this.observerConsecutiveEmpties.delete(sessionId)
+  }
+
   /** Write one debug event when `debugLog` is enabled; otherwise a no-op. */
   debug(sessionId: string, event: string, data: Record<string, unknown> = {}): void {
     if (!this._config.debugLog) return
@@ -109,6 +123,7 @@ export class OmRuntime {
     this.clearStageErrors(sessionId)
     this.observerEmptyBackoff.delete(sessionId)
     this.resolveFailureNotified.delete(sessionId)
+    this.observerConsecutiveEmpties.delete(sessionId)
     this.compactInFlight.delete(sessionId)
     this.consolidationInFlight.delete(sessionId)
   }

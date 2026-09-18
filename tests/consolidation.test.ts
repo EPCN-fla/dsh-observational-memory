@@ -191,4 +191,22 @@ describe('consolidation pipeline', () => {
     expect(warnings.some((m) => m.includes('observer failed'))).toBe(true)
     expect(runtime.store.entries('s1')).toHaveLength(0)
   })
+  it('warns on consecutive empty observer runs', async () => {
+    const events = longConversation(20)
+    const { ctx, warnings, infos } = fakeCtx([{ text: 'nothing worth recording' }])
+    const runtime = new OmRuntime(Config({ observeAfterTokens: 10, reflectAfterTokens: 100_000, storageDir: dir }), {
+      onError: () => {},
+    })
+
+    await maybeLaunchConsolidation(ctx, runtime, fakeSession(events))
+    expect(runtime.store.entries('s1')).toHaveLength(0)
+    expect(infos.some((m) => m.includes('found nothing new'))).toBe(true)
+    expect(warnings.some((m) => m.includes('consecutive runs'))).toBe(false)
+
+    // The backoff lifts once another observeAfterTokens worth of source text
+    // accumulates; a second consecutive empty verdict escalates to a warning.
+    const more = [...events, userEvent('extra source text to clear the backoff, deliberately long enough to pass the ten-token gate', events.length)]
+    await maybeLaunchConsolidation(ctx, runtime, fakeSession(more))
+    expect(warnings.some((m) => m.includes('2 consecutive runs'))).toBe(true)
+  })
 })

@@ -209,11 +209,20 @@ async function runObserverStage(
 
   if (!observations || observations.length === 0) {
     runtime.observerEmptyBackoff.set(sessionId, { coverageSeq, tokensAtEmpty: tokens })
-    runtime.debug(sessionId, 'observer.empty', { coversUpToSeq })
-    notify('info', 'observer found nothing new in this chunk (coverage unchanged; will retry later)')
+    const streak = runtime.noteObserverEmpty(sessionId)
+    runtime.debug(sessionId, 'observer.empty', { coversUpToSeq, consecutiveEmpties: streak })
+    // A first empty verdict can be legitimate ("nothing worth recording");
+    // consecutive empties over a growing backlog usually mean the worker
+    // model is not following the record_observations tool contract — warn.
+    if (streak >= 2) {
+      notify('warning', `observer returned no observations in ${streak} consecutive runs; the worker model may not be calling the record_observations tool`)
+    } else {
+      notify('info', 'observer found nothing new in this chunk (coverage unchanged; will retry later)')
+    }
     return
   }
   runtime.observerEmptyBackoff.delete(sessionId)
+  runtime.clearObserverEmpties(sessionId)
 
   const record = buildObservationsRecorded(observations, coversUpToSeq)
   if (!record) return
