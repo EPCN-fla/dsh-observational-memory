@@ -1,5 +1,8 @@
 /* Memory view tab chrome: self-contained like the settings card, but every
-   color comes from the --dsw-alias design tokens so skins recolor it. */
+   color comes from the --dsw-alias design tokens so skins recolor it, and
+   every font from the --dsw-font-* / --ds-font-family-code tokens so the tab
+   follows the DSH type scale (a bare <pre> would otherwise fall back to the
+   browser's default monospace). */
 
 .view {
   display: flex;
@@ -9,6 +12,7 @@
   height: 100%;
   overflow-y: auto;
   box-sizing: border-box;
+  font: var(--dsw-font-xs-13);
   color: var(--dsw-alias-label-primary);
   background: var(--dsw-alias-bg-layer-1);
 }
@@ -109,8 +113,7 @@
 
 .sectionTitle {
   margin: 0;
-  font-size: 13px;
-  font-weight: 600;
+  font: var(--dsw-font-xs-strong-13);
   color: var(--dsw-alias-label-secondary);
 }
 
@@ -121,6 +124,9 @@
   border: 0.5px solid var(--dsw-alias-border-l2);
   background: var(--dsw-alias-bg-layer-2);
   color: var(--dsw-alias-label-primary);
+  /* The report keeps its aligned columns in DSH's code font (with its CJK
+     fallbacks), not the browser default monospace a bare <pre> would get. */
+  font-family: var(--ds-font-family-code);
   font-size: 12px;
   line-height: 1.6;
   white-space: pre-wrap;
