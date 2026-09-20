@@ -44,11 +44,16 @@ function forkSession(id: string, parentId: string | undefined, inheritedEventCou
 
 /** A ctx stub whose session store resolves the given attached sessions. */
 function fakeCtx(attached: Session[] = []): Context {
-  const { ctx } = fakeLlmCtx([])
+  return fakeCtxWithLlm(attached).ctx
+}
+
+/** The same stub with its scripted-llm call counter exposed. */
+function fakeCtxWithLlm(attached: Session[] = []): { ctx: Context; callCount: () => number } {
+  const { ctx, callCount } = fakeLlmCtx([])
   ctx.sessions = { get: (id: string) => attached.find((session) => session.id === id) }
   ctx.agents = { get: () => undefined }
   ctx.logger = { info: () => {}, warn: () => {} }
-  return ctx as Context
+  return { ctx: ctx as Context, callCount }
 }
 
 function visibleRecord(upToSeq: number, text: string): VisibleMemoryRecord {
@@ -167,12 +172,12 @@ describe('fork memory inheritance', () => {
     for (const entry of within) await runtime.store.append('parent', entry)
 
     const child = forkSession('child', 'parent', 21)
-    const ctx = fakeCtx()
+    const { ctx, callCount } = fakeCtxWithLlm()
     await maybeLaunchConsolidation(ctx, runtime, child)
 
     expect(await runtime.store.load('child')).toEqual(within)
     // Passive: the pipeline itself never launched (no model call happened).
-    expect((ctx as unknown as { llm: unknown }).llm).toBeDefined()
+    expect(callCount()).toBe(0)
     expect(runtime.consolidationInFlight.size).toBe(0)
   })
 })
