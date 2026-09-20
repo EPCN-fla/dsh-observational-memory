@@ -81,6 +81,13 @@ export class OmMemoryController {
   private readonly listeners = new Set<() => void>()
   /** Bumps on every issued request so a late response never overwrites a newer one. */
   private generation = 0
+  /**
+   * Bumps on every issued run so only the latest run owns the `running`
+   * flag. Separate from {@link generation}: a refresh interleaving a run
+   * must not strand the flag (a stale run would return early and never
+   * clear it), so runs guard on their own epoch.
+   */
+  private runEpoch = 0
 
   constructor(
     private readonly rpc: ConnectionRpcLike,
@@ -151,17 +158,20 @@ export class OmMemoryController {
    * the user runs memory work explicitly from here.
    */
   async run(): Promise<void> {
-    const generation = ++this.generation
+    const epoch = ++this.runEpoch
     this.publish({ ...this.current, running: true, error: undefined })
     const run = await this.attempt(this.fetch('observationalMemory/run', { sessionId: this.sessionId }, isRunResult))
-    if (generation !== this.generation) return
+    // A newer run owns the flag now; its own settle path clears it.
+    if (epoch !== this.runEpoch) return
     if (!run.ok) {
       this.publish({ ...this.current, running: false, error: run.message })
       return
     }
+    // Re-pull whatever the run produced. refresh() keeps the flag (its
+    // publishes spread/preserve `running`); the flip below is epoch-guarded,
+    // never generation-guarded, so an interleaved refresh cannot strand it.
     await this.refresh()
-    // refresh() re-published a full snapshot; only the flag flip remains.
-    if (generation + 1 !== this.generation) return
+    if (epoch !== this.runEpoch) return
     this.publish({ ...this.current, running: false })
   }
 

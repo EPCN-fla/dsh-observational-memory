@@ -122,6 +122,28 @@ describe('OmMemoryController', () => {
     expect(state.error).toBe('run exploded')
   })
 
+  it('clears the running flag when a refresh interleaves the run', async () => {
+    let releaseRun: (value: unknown) => void = () => {}
+    const runGate = new Promise((resolve) => {
+      releaseRun = resolve
+    })
+    const rpc: ConnectionRpcLike = {
+      async call(_channel, endpoint) {
+        if (endpoint === 'observationalMemory/run') return (await runGate) as never
+        return { ok: true, value: { text: `fresh:${endpoint}`, enabled: false } }
+      },
+    }
+    const controller = new OmMemoryController(rpc, 'session-1')
+    const run = controller.run()
+    const refresh = controller.refresh()
+    releaseRun({ ok: true, value: { ran: true } })
+    await Promise.all([run, refresh])
+    // Regression: the refresh bumped the request generation mid-run; the
+    // run's flag flip must not be generation-guarded, or it never fires.
+    expect(controller.getSnapshot().running).toBe(false)
+    expect(controller.getSnapshot().viewText).toBe('fresh:observationalMemory/view')
+  })
+
   it('drops a stale response issued before a newer refresh', async () => {
     let release: (value: unknown) => void = () => {}
     const gate = new Promise((resolve) => {
