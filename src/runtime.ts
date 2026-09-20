@@ -3,7 +3,7 @@
  * in-flight guards, worker error memory, and worker-model resolution.
  */
 import type { Context } from '@deepseek-ai/cordis'
-import type { Session } from '@deepseek-ai/dsh-session'
+import type { Session, SessionId } from '@deepseek-ai/dsh-session'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { resolveDshHome } from './home.ts'
 import { resolveConfig, type Config, type ResolvedConfig } from './config.ts'
@@ -52,6 +52,8 @@ export class OmRuntime {
   readonly consolidationInFlight = new Set<string>()
   /** Sessions with a proactive compaction currently in flight. */
   readonly compactInFlight = new Set<string>()
+  /** Fork-ledger inheritance runs in flight, deduped per session. */
+  private readonly inheritanceInFlight = new Map<string, Promise<void>>()
 
   readonly lastObserverError = new Map<string, string>()
   readonly lastReflectorError = new Map<string, string>()
@@ -176,6 +178,74 @@ export class OmRuntime {
     this.observerConsecutiveEmpties.delete(sessionId)
     this.compactInFlight.delete(sessionId)
     this.consolidationInFlight.delete(sessionId)
+  }
+
+  /**
+   * A fork child (rollback/branch) starts with an empty ledger while its
+   * memory lives under the parent session's id, so the branch appears to
+   * start over. On the child's first memory touch, copy the lineage's records
+   * through the fork boundary into the child's ledger: the branch keeps the
+   * memory of the path it shares with its source, while records covering only
+   * the abandoned future (seqs beyond the boundary) stay behind. Watermarks
+   * stay meaningful because a fork preserves the inherited events' seqs.
+   *
+   * The nearest ancestor with usable records wins; an ancestor with an empty
+   * ledger (e.g. forked before it ever consolidated) defers to its own
+   * parent, which keeps rollback-of-rollback chains working. Detached
+   * ancestors still lend their on-disk ledger, but only an attached session
+   * reveals its lineage, so the walk ends at the first detached ancestor.
+   *
+   * Idempotent: a child that already owns records never re-inherits, and
+   * concurrent touches share one run. I/O failures degrade to "nothing
+   * inherited" (the store reports and swallows them) — memory work must
+   * never break the session pipeline.
+   */
+  async ensureInherited(ctx: Context, session: Session): Promise<void> {
+    const parentId = session.header.parentSession
+    if (parentId === undefined) return
+    // The durable fork cut: inherited events occupy seqs 0..count-1, so the
+    // last inherited seq is count-1 (a 0-count fork is an empty prefix).
+    const inheritedCount: number = session.inheritedEventCount
+    if (typeof inheritedCount !== 'number' || inheritedCount <= 0) return
+    const sessionId: string = session.id
+    const pending = this.inheritanceInFlight.get(sessionId)
+    if (pending) return pending
+    const task = this.inheritLineage(ctx, sessionId, parentId, inheritedCount - 1)
+    this.inheritanceInFlight.set(sessionId, task)
+    try {
+      await task
+    } finally {
+      this.inheritanceInFlight.delete(sessionId)
+    }
+  }
+
+  /** One inheritance pass: walk up the lineage to the nearest usable ledger. */
+  private async inheritLineage(ctx: Context, sessionId: string, parentId: SessionId, boundary: number): Promise<void> {
+    const own = await this._store.load(sessionId)
+    if (own.length > 0) return
+    const visited = new Set<string>([sessionId])
+    let ancestorId: SessionId | undefined = parentId
+    while (ancestorId !== undefined && !visited.has(ancestorId)) {
+      visited.add(ancestorId)
+      const entries = await this._store.load(ancestorId)
+      const inherited = entries.filter((entry) =>
+        entry.kind === 'visible-memory' ? entry.upToSeq <= boundary : entry.coversUpToSeq <= boundary)
+      if (inherited.length > 0) {
+        for (const entry of inherited) {
+          await this._store.append(sessionId, entry)
+        }
+        this.debug(sessionId, 'ledger.inherited', { from: ancestorId, records: inherited.length, throughSeq: boundary })
+        if (this._config.showWorkerNotifications) {
+          ctx.logger.info(
+            `[observational-memory] session inherited ${inherited.length} memory record(s) from ${ancestorId} (through seq ${boundary})`,
+          )
+        }
+        return
+      }
+      // The ancestor's ledger has nothing within the boundary (possibly
+      // nothing at all); its own fork parent may still hold usable records.
+      ancestorId = ctx.sessions.get(ancestorId)?.header.parentSession
+    }
   }
 
   /**

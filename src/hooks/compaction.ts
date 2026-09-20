@@ -74,6 +74,8 @@ export function registerCompactionHook(ctx: Context, runtime: OmRuntime): void {
 
       let parked: PendingVisible
       try {
+        // A forked branch renders from the memory it inherited at the cut.
+        await runtime.ensureInherited(ctx, session)
         const entries = await runtime.store.load(sessionId)
         // Fold through the compaction cut — the last shadowed surface node —
         // not the raw log tip: the retained tail stays verbatim in context, so

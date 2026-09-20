@@ -39,6 +39,9 @@ function execWith(events: ReturnType<typeof userEvent>[]) {
     agent: {
       session: {
         id: 's1',
+        // The Session contract guarantees header/inheritedEventCount exist.
+        header: {},
+        inheritedEventCount: 0,
         snapshotEvents: () => events,
       },
     },

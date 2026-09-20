@@ -114,6 +114,7 @@ export class OmApiService extends TypertRemoteService {
   async status(request: OmSessionRequest, signal?: AbortSignal): Promise<OmTextValue> {
     const sessionId = sessionIdOf(request)
     const session = attachedSession(this.ctx, sessionId)
+    await this.runtime.ensureInherited(this.ctx, session)
     const agent = this.ctx.agents.get(sessionId)
     const config = this.runtime.config
 
@@ -152,6 +153,9 @@ export class OmApiService extends TypertRemoteService {
       throw new RemoteError('gateway/bad-request', `mode must be "visible" or "full"; received ${JSON.stringify(request.mode)}`, {})
     }
     const mode: ViewMode = request.mode ?? 'visible'
+    // Detached sessions have no lineage in reach; their own ledger answers.
+    const session = this.ctx.sessions.get(sessionId)
+    if (session) await this.runtime.ensureInherited(this.ctx, session)
     const entries = await this.runtime.store.load(sessionId)
     return { text: buildViewText(entries, mode) }
   }

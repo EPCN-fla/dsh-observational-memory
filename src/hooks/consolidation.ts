@@ -73,6 +73,10 @@ function launch(ctx: Context, runtime: OmRuntime, session: Session): void {
 
 /** Exported for tests; the triggers above are the production callers. */
 export async function maybeLaunchConsolidation(ctx: Context, runtime: OmRuntime, session: Session): Promise<void> {
+  // Inheriting a fork parent's ledger is not a proactive trigger: passive
+  // mode keeps it, so a rolled-back branch holds on to the memory it shares
+  // with its source even with every background worker disabled.
+  await runtime.ensureInherited(ctx, session)
   const config = runtime.config
   if (config.passive) return
   const sessionId: string = session.id

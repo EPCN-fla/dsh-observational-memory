@@ -124,6 +124,8 @@ dsh plugin --profile web add /absolute/path/to/dsh-observational-memory
 
 每条用户消息（含 steering 消息）下方、「复制」左侧新增**回退**按钮：点击后在**该消息之前**的最近已完成轮次边界处分叉出一个新会话（fork），打开新会话，并把该消息的原文放回其输入框——可以修改后重新发送。整个过程非破坏性：原会话历史原样保留在自己的分支上。
 
+新分支在首次触及记忆时**继承**原会话截至分叉点的记忆（观察、反思、清理记录与可见记忆），回退后无需从零积累；仅覆盖被放弃分支（分叉点之后事件）的记录不随分叉转移。父分支账本为空时会沿分叉链向上找到最近可用的账本，因此连续回退也能继承。被动模式不影响继承。
+
 DSH 只能按轮次边界切分会话，因此按钮在以下情况保持禁用（悬停有提示）：首轮消息（之前没有可回退的边界）、纯附件或含附件的消息（草稿无法还原附件）、无文本消息。卸载本插件后，用户消息渲染恢复原样。
 
 ## 配置
@@ -208,6 +210,7 @@ npm run build       # 构建 lib/index.js（宿主 ESM）+ lib/client.js（浏�
 | `tests/recall-tool.test.ts` | recall 工具注册与证据恢复 |
 | `tests/memory-controller.test.ts`、`tests/memory-view.test.tsx` | 记忆选项卡控制器与视图 |
 | `tests/rollback.test.ts`、`tests/user-message*.test.tsx` | 回退按钮门控与交互 |
+| `tests/inheritance.test.ts` | 分叉/回退后的账本继承（边界过滤、分叉链、被动模式） |
 | `tests/serialize.test.ts` | 源事件序列化与 token 估算 |
 
 ### 本地联调

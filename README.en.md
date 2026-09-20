@@ -124,6 +124,8 @@ The agent can call `recall(id)` with a 12-character lowercase hex memory id to r
 
 Every user message (steering messages included) gains a **rollback** button left of its copy button: clicking it forks the session at the completed-turn boundary right before that message, opens the child session, and restores the message text into its composer — ready to edit and resend. The operation is non-destructive: the source session keeps its history on its own branch.
 
+On its first memory touch the new branch **inherits** the source session's memory through the fork point (observations, reflections, drop records and visible memory), so a rollback never restarts memory from scratch; records covering only the abandoned branch (events past the fork point) stay behind. When the immediate parent's ledger is empty, the walk continues up the fork lineage to the nearest usable ledger, so chained rollbacks still inherit. Passive mode does not affect inheritance.
+
 DSH can only cut sessions at turn boundaries, so the button stays disabled (with an explanatory tooltip) for first-turn messages (no earlier boundary to roll back to), messages with attachments (a draft cannot restore uploads), and textless messages. Unloading the plugin restores the built-in user message rendering.
 
 ## Configuration
@@ -208,6 +210,7 @@ All tests live in `tests/`:
 | `tests/recall-tool.test.ts` | recall tool registration and evidence recovery |
 | `tests/memory-controller.test.ts`, `tests/memory-view.test.tsx` | Memory tab controller and view |
 | `tests/rollback.test.ts`, `tests/user-message*.test.tsx` | rollback gating and interaction |
+| `tests/inheritance.test.ts` | ledger inheritance after fork/rollback (boundary filtering, lineage walk, passive mode) |
 | `tests/serialize.test.ts` | source-event serialization and token estimation |
 
 ### Local integration
