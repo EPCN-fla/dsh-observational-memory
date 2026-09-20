@@ -302,7 +302,11 @@ async function runReflectorStage(
   const entries = await runtime.store.load(sessionId)
   const events = session.snapshotEvents()
   const reflectionTokens = rawTokensSinceReflectionCoverage(events, entries)
-  if (!options.force && reflectionTokens < config.reflectAfterTokens) return { reflections: [] }
+  // A forced run bypasses the threshold but not emptiness: with no new
+  // source text since the last reflection, re-reflecting the unchanged pool
+  // would spend a model call on the exact input it already crystallized.
+  const reflectorDue = options.force ? reflectionTokens > 0 : reflectionTokens >= config.reflectAfterTokens
+  if (!reflectorDue) return { reflections: [] }
 
   const observationCoverageSeq = latestCoverageSeq(entries, 'observations-recorded')
   if (observationCoverageSeq < 0) return { reflections: [] }
