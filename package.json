@@ -1,6 +1,6 @@
 {
   "name": "dsh-observational-memory",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Observational memory for DeepSeek Harness: background observers distill session work into observations and durable reflections, so long sessions survive compaction with their decisions intact.",
   "keywords": [
     "deepseek-harness",
