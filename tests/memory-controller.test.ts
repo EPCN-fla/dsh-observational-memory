@@ -53,6 +53,7 @@ describe('OmMemoryController', () => {
     expect(state.phase).toBe('ready')
     expect(state.statusText).toBe('STATUS')
     expect(state.error).toContain('unknown endpoint observationalMemory/view')
+    expect(state.failedAction).toBe('refresh')
   })
 
   it('switches the view mode and refetches only the view section', async () => {
@@ -120,6 +121,7 @@ describe('OmMemoryController', () => {
     const state = controller.getSnapshot()
     expect(state.running).toBe(false)
     expect(state.error).toBe('run exploded')
+    expect(state.failedAction).toBe('run')
   })
 
   it('clears the running flag when a refresh interleaves the run', async () => {

@@ -30,8 +30,10 @@ export interface OmMemoryState {
   /** Debug-log recording switch on the host; the log section hides when off. */
   logsEnabled: boolean
   logsText: string
-  /** Last failed refresh's message (kept visible alongside stale content). */
+  /** Last failed refresh/run's message (kept visible alongside stale content). */
   error: string | undefined
+  /** Which action produced {@link error}, so the label names it correctly. */
+  failedAction: 'refresh' | 'run' | undefined
   /** Epoch ms of the last successful refresh. */
   refreshedAt: number | undefined
   refreshing: boolean
@@ -47,6 +49,7 @@ const INITIAL: OmMemoryState = {
   logsEnabled: false,
   logsText: '',
   error: undefined,
+  failedAction: undefined,
   refreshedAt: undefined,
   refreshing: false,
   running: false,
@@ -145,6 +148,7 @@ export class OmMemoryController {
       logsEnabled: logs.ok ? logs.value.enabled : this.current.logsEnabled,
       logsText: logs.ok ? logs.value.text : this.current.logsText,
       error: error && !error.ok ? error.message : undefined,
+      failedAction: error && !error.ok ? 'refresh' : undefined,
       refreshedAt: error === undefined ? Date.now() : this.current.refreshedAt,
       refreshing: false,
       running: this.current.running,
@@ -159,12 +163,12 @@ export class OmMemoryController {
    */
   async run(): Promise<void> {
     const epoch = ++this.runEpoch
-    this.publish({ ...this.current, running: true, error: undefined })
+    this.publish({ ...this.current, running: true, error: undefined, failedAction: undefined })
     const run = await this.attempt(this.fetch('observationalMemory/run', { sessionId: this.sessionId }, isRunResult))
     // A newer run owns the flag now; its own settle path clears it.
     if (epoch !== this.runEpoch) return
     if (!run.ok) {
-      this.publish({ ...this.current, running: false, error: run.message })
+      this.publish({ ...this.current, running: false, error: run.message, failedAction: 'run' })
       return
     }
     // Re-pull whatever the run produced. refresh() keeps the flag (its
@@ -184,9 +188,9 @@ export class OmMemoryController {
     const view = await this.attempt(this.fetch('observationalMemory/view', { sessionId: this.sessionId, mode }, isTextResult))
     if (generation !== this.generation) return
     this.publish(view.ok
-      ? { ...this.current, viewText: view.value.text, error: undefined, refreshing: false }
+      ? { ...this.current, viewText: view.value.text, error: undefined, failedAction: undefined, refreshing: false }
       // On failure keep the previous mode selected over its matching content:
       // a flipped label above stale text would misrepresent the scope.
-      : { ...this.current, viewMode: previousMode, error: view.message, refreshing: false })
+      : { ...this.current, viewMode: previousMode, error: view.message, failedAction: 'refresh', refreshing: false })
   }
 }

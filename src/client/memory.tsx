@@ -150,7 +150,9 @@ export function MemoryView(props: MemoryViewProps) {
         </p>
       ) : null}
       {state.error !== undefined ? (
-        <p className={css.error} role="status">{t('memory.error')}: {state.error}</p>
+        <p className={css.error} role="status">
+          {t(state.failedAction === 'run' ? 'memory.runFailed' : 'memory.error')}: {state.error}
+        </p>
       ) : null}
       {state.phase === 'loading' ? (
         <p className={css.empty} role="status">{t('memory.loading')}</p>
