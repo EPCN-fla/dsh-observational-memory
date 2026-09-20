@@ -4,7 +4,8 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Session } from '@deepseek-ai/dsh-session'
 import { Config } from '../src/config.ts'
-import { maybeLaunchConsolidation } from '../src/hooks/consolidation.ts'
+import { maybeLaunchConsolidation, runConsolidationNow } from '../src/hooks/consolidation.ts'
+import { buildObservationsRecorded, buildReflectionsRecorded } from '../src/ledger/index.ts'
 import type { EventView } from '../src/serialize.ts'
 import { hashId } from '../src/ids.ts'
 import { OmRuntime } from '../src/runtime.ts'
@@ -380,5 +381,122 @@ describe('consolidation pipeline', () => {
       'p/m',
       'p/m',
     ])
+  })
+})
+
+describe('manual consolidation run (Memory tab "run now")', () => {
+  const observerTurns = [
+    {
+      toolCalls: [
+        {
+          id: 'c1',
+          name: 'record_observations',
+          arguments: JSON.stringify({
+            observations: [
+              {
+                timestamp: '2026-01-15 14:30',
+                content: 'User kicked off a long task.',
+                relevance: 'medium',
+                sourceEventSeqs: [0],
+              },
+            ],
+          }),
+        },
+      ],
+    },
+    { text: 'done' },
+    // Forced reflector finds the fresh observations but crystallizes nothing.
+    { text: 'nothing to crystallize' },
+  ]
+
+  it('runs the full pipeline in passive mode, ignoring the token clocks', async () => {
+    const events = longConversation(20)
+    const { ctx, callCount } = fakeCtx(observerTurns)
+    const runtime = new OmRuntime(
+      Config({ passive: true, observeAfterTokens: 1_000_000, reflectAfterTokens: 1_000_000, storageDir: dir }),
+      { onError: () => {} },
+    )
+
+    const ran = await runConsolidationNow(ctx, runtime, fakeSession(events))
+
+    expect(ran).toBe(true)
+    expect(callCount()).toBe(3)
+    const entries = runtime.store.entries('s1')
+    expect(entries.map((entry) => entry.kind)).toEqual(['observations-recorded'])
+    expect(entries[0]).toMatchObject({ coversUpToSeq: events.length - 1 })
+  })
+
+  it('returns false while a run is already in flight', async () => {
+    const events = longConversation(20)
+    const { ctx } = fakeCtx(observerTurns)
+    const runtime = new OmRuntime(Config({ observeAfterTokens: 10, storageDir: dir }), { onError: () => {} })
+    const session = fakeSession(events)
+
+    // The slot is claimed synchronously, before the pipeline's first await.
+    const first = runConsolidationNow(ctx, runtime, session)
+    await expect(runConsolidationNow(ctx, runtime, session)).resolves.toBe(false)
+    await expect(first).resolves.toBe(true)
+    // The guard released: a later manual run executes again.
+    await expect(runConsolidationNow(ctx, runtime, session)).resolves.toBe(true)
+  })
+
+  it('makes no model call over an empty backlog', async () => {
+    const { ctx, callCount } = fakeCtx(observerTurns)
+    const runtime = new OmRuntime(Config({ observeAfterTokens: 10, storageDir: dir }), { onError: () => {} })
+
+    await expect(runConsolidationNow(ctx, runtime, fakeSession([]))).resolves.toBe(true)
+    expect(callCount()).toBe(0)
+    expect(runtime.store.entries('s1')).toHaveLength(0)
+  })
+
+  it('spends no model call when memory is already up to date', async () => {
+    const events = longConversation(20)
+    const { ctx, callCount } = fakeCtx(observerTurns)
+    const runtime = new OmRuntime(Config({ observeAfterTokens: 10, storageDir: dir }), { onError: () => {} })
+    // Ledger fully covering the session: nothing new for either stage.
+    const observations = buildObservationsRecorded(
+      [{ id: hashId('covered fact'), content: 'covered fact', timestamp: '2026-01-15 14:30', relevance: 'medium', sourceEventSeqs: [0], tokenCount: 10 }],
+      events.length - 1,
+    )
+    const reflections = buildReflectionsRecorded(
+      [{ id: hashId('covered conclusion'), content: 'covered conclusion', supportingObservationIds: [hashId('covered fact')], tokenCount: 10 }],
+      events.length - 1,
+    )
+    if (!observations || !reflections) throw new Error('fixture records must build')
+    await runtime.store.append('s1', observations)
+    await runtime.store.append('s1', reflections)
+
+    await expect(runConsolidationNow(ctx, runtime, fakeSession(events))).resolves.toBe(true)
+    expect(callCount()).toBe(0)
+    expect(runtime.store.entries('s1')).toHaveLength(2)
+  })
+
+  it('is the explicit retry that bypasses the deliberate-empty backoff', async () => {
+    const events = longConversation(20)
+    const { ctx, callCount } = fakeCtx([{ text: 'nothing worth recording' }])
+    const runtime = new OmRuntime(Config({ observeAfterTokens: 10, reflectAfterTokens: 100_000, storageDir: dir }), {
+      onError: () => {},
+    })
+    const session = fakeSession(events)
+
+    await maybeLaunchConsolidation(ctx, runtime, session)
+    expect(callCount()).toBe(1)
+    // Same span: the backoff suppresses the automatic re-fire…
+    await maybeLaunchConsolidation(ctx, runtime, session)
+    expect(callCount()).toBe(1)
+    // …but the manual run ignores it.
+    await expect(runConsolidationNow(ctx, runtime, session)).resolves.toBe(true)
+    expect(callCount()).toBe(2)
+  })
+
+  it('refuses subagent sessions, which have no memory of their own', async () => {
+    const events = longConversation(20)
+    const { ctx, callCount } = fakeCtx(observerTurns)
+    const runtime = new OmRuntime(Config({ observeAfterTokens: 10, storageDir: dir }), { onError: () => {} })
+    const subagent = Object.assign(fakeSession(events), { header: { origin: 'subagent' as const } })
+
+    await expect(runConsolidationNow(ctx, runtime, subagent)).resolves.toBe(false)
+    expect(callCount()).toBe(0)
+    expect(runtime.consolidationInFlight.size).toBe(0)
   })
 })

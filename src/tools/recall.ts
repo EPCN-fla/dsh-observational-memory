@@ -76,6 +76,7 @@ export function registerRecallTool(ctx: Context, runtime: OmRuntime): void {
         if (!agent) return 'recall is unavailable outside an agent session.'
         const sessionId: string = agent.session.id
         const events = agent.session.snapshotEvents()
+        await runtime.ensureInherited(ctx, agent.session)
         const entries = await runtime.store.load(sessionId)
         const result = recallMemorySources(entries, events, memoryId)
         if (result.status === 'not_found') {

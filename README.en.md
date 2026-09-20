@@ -108,11 +108,13 @@ Open **Settings → Plugins → Plugin configuration** and expand the **Observat
 
 ### The Memory tab
 
-The conversation's view ring gains a **Memory** tab right of Chat and Trajectory, carrying the content of the Pi version's `/om:status` and `/om:view` commands. The host renders the reports on demand through the plugin's Typert Remote endpoints (`observationalMemory/status|view|logs`):
+The conversation's view ring gains a **Memory** tab right of Chat and Trajectory, carrying the content of the Pi version's `/om:status` and `/om:view` commands. The host renders the reports on demand through the plugin's Typert Remote endpoints (`observationalMemory/status|view|run|logs`):
 
 - **Status**: memory inventory (recorded / dropped / active / visible observations and reflections, drift counts), per-worker progress (tokens to the next observation / reflection / compaction, with the ratio-mode annotation), in-flight runs, and the latest worker errors.
 - **Memory content**: the `/om:view` output, switchable between **Visible** (what the agent actually saw after the latest compaction) and **Full** (the whole ledger); a copy button writes the current content to the clipboard.
 - **Debug log**: when `debugLog` is on, the tail of the session's NDJSON debug events (200 lines by default).
+
+The toolbar's **Run now** button triggers one full consolidation pass (observer → reflector → dropper) on demand, bypassing the passive switch and the token clocks (an empty backlog still costs no model call); a run already in flight is never duplicated. This is the proactive entry passive mode keeps — available in active mode too.
 
 The tab fetches once when opened and then only on the Refresh button — no polling.
 
@@ -123,6 +125,8 @@ The agent can call `recall(id)` with a 12-character lowercase hex memory id to r
 ### The rollback button
 
 Every user message (steering messages included) gains a **rollback** button left of its copy button: clicking it forks the session at the completed-turn boundary right before that message, opens the child session, and restores the message text into its composer — ready to edit and resend. The operation is non-destructive: the source session keeps its history on its own branch.
+
+On its first memory touch the new branch **inherits** the source session's memory through the fork point (observations, reflections, drop records and visible memory), so a rollback never restarts memory from scratch; records covering only the abandoned branch (events past the fork point) stay behind. When the immediate parent's ledger is empty, the walk continues up the fork lineage to the nearest usable ledger, so chained rollbacks still inherit. Passive mode does not affect inheritance.
 
 DSH can only cut sessions at turn boundaries, so the button stays disabled (with an explanatory tooltip) for first-turn messages (no earlier boundary to roll back to), messages with attachments (a draft cannot restore uploads), and textless messages. Unloading the plugin restores the built-in user message rendering.
 
@@ -149,7 +153,7 @@ Configuration lives in its own `observational-memory` namespace of the DSH user 
 | `model` | session model | Worker model override: `{ provider, id, reasoningEffort? }`; in the settings card, picked from the models added to DSH via cascading provider → model → reasoning-effort dropdowns |
 | `modelFallbackAfterFailures` | `0` | After this many consecutive memory-worker failures, suspend the model override and fall back to the session model; `0` means never. Applies only when a `model` override is configured; the count restarts on an override-path success, a config change, or a session reload |
 | `showWorkerNotifications` | `true` | Log worker progress to the host log (warnings and errors always log) |
-| `passive` | `false` | Passive mode: disable all proactive background triggers |
+| `passive` | `false` | Passive mode: disable all proactive background triggers (the Memory tab's **Run now**, manual/DSH compaction and recall stay available) |
 | `debugLog` | `false` | Write per-session NDJSON debug events under the storage directory |
 | `storageDir` | `$DSH_HOME/observational-memory` | Ledger storage root |
 
@@ -208,6 +212,7 @@ All tests live in `tests/`:
 | `tests/recall-tool.test.ts` | recall tool registration and evidence recovery |
 | `tests/memory-controller.test.ts`, `tests/memory-view.test.tsx` | Memory tab controller and view |
 | `tests/rollback.test.ts`, `tests/user-message*.test.tsx` | rollback gating and interaction |
+| `tests/inheritance.test.ts` | ledger inheritance after fork/rollback (boundary filtering, lineage walk, passive mode) |
 | `tests/serialize.test.ts` | source-event serialization and token estimation |
 
 ### Local integration
@@ -228,7 +233,7 @@ src/
   index.ts            plugin entry (Config schema, settings namespace, trigger/tool wiring)
   config.ts           config schema and derived budgets (incl. ratio-mode threshold resolution)
   runtime.ts          shared runtime (live config, model resolution, in-flight guards, errors)
-  api.ts              Typert Remote service (observationalMemory/status|view|logs for the Memory tab)
+  api.ts              Typert Remote service (observationalMemory/status|view|run|logs for the Memory tab)
   report.ts           /om:status and /om:view report text builders (pure functions)
   ledger/             memory ledger core (types/fold/projection/progress/render/recall/store)
   workers/            observer/reflector/dropper (loop + prompts + coverage + pool)

@@ -47,6 +47,7 @@ export interface MemoryViewProps {
   /** Selector hook synthesized from the inject face's `hooks.memory` store. */
   useMemory: <S>(selector: (state: OmMemoryState) => S) => S
   refresh: () => void
+  run: () => void
   setViewMode: (mode: MemoryViewMode) => void
 }
 
@@ -123,6 +124,14 @@ export function MemoryView(props: MemoryViewProps) {
           <button
             type="button"
             className={css.toolButton}
+            disabled={state.running || state.refreshing}
+            onClick={props.run}
+          >
+            {t(state.running ? 'memory.running' : 'memory.run')}
+          </button>
+          <button
+            type="button"
+            className={css.toolButton}
             disabled={state.viewText === ''}
             onClick={onCopy}
           >
@@ -141,7 +150,9 @@ export function MemoryView(props: MemoryViewProps) {
         </p>
       ) : null}
       {state.error !== undefined ? (
-        <p className={css.error} role="status">{t('memory.error')}: {state.error}</p>
+        <p className={css.error} role="status">
+          {t(state.failedAction === 'run' ? 'memory.runFailed' : 'memory.error')}: {state.error}
+        </p>
       ) : null}
       {state.phase === 'loading' ? (
         <p className={css.empty} role="status">{t('memory.loading')}</p>

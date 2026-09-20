@@ -114,7 +114,7 @@ export function buildStatusText(
     config.passive === true
       ? [
         '── Mode ──',
-        'Passive: automatic memory workers and auto-compaction disabled; manual/DSH compaction and recall remain active',
+        'Passive: automatic memory workers and auto-compaction disabled; the Memory tab "Run now" action, manual/DSH compaction and recall remain active',
         '',
       ]
       : []

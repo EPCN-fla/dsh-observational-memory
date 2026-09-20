@@ -16,6 +16,8 @@ function stateWith(overrides: Partial<OmMemoryState> = {}): OmMemoryState {
     error: undefined,
     refreshedAt: undefined,
     refreshing: false,
+    running: false,
+    failedAction: undefined,
     ...overrides,
   }
 }
@@ -26,6 +28,7 @@ function render(state: OmMemoryState, locale: Record<string, string>) {
       t: (key: string) => locale[key] ?? key,
       useMemory: (selector: (s: OmMemoryState) => unknown) => selector(state),
       refresh: () => {},
+      run: () => {},
       setViewMode: () => {},
     } as never),
   )
@@ -51,6 +54,24 @@ describe('MemoryView', () => {
     const html = render(stateWith({ error: 'boom' }), en)
     expect(html).toContain('Load failed')
     expect(html).toContain('boom')
+  })
+
+  it('renders the run action, swapped to its busy label while running', () => {
+    const idle = render(stateWith(), zh as Record<string, string>)
+    expect(idle).toContain('立即运行')
+    const running = render(stateWith({ running: true }), zh as Record<string, string>)
+    expect(running).toContain('运行中…')
+    expect(running).not.toContain('立即运行')
+    expect(render(stateWith(), en)).toContain('Run now')
+    expect(render(stateWith({ running: true }), en)).toContain('Running…')
+  })
+
+  it('labels a failed run differently from a failed load', () => {
+    const html = render(stateWith({ error: 'boom', failedAction: 'run' }), zh as Record<string, string>)
+    expect(html).toContain('运行失败')
+    expect(html).not.toContain('加载失败')
+    expect(render(stateWith({ error: 'boom', failedAction: 'run' }), en)).toContain('Run failed')
+    expect(render(stateWith({ error: 'boom', failedAction: 'refresh' }), en)).toContain('Load failed')
   })
 
   it('marks the active view mode', () => {

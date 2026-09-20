@@ -108,11 +108,13 @@ dsh plugin --profile web add /absolute/path/to/dsh-observational-memory
 
 ### 记忆选项卡
 
-对话上方的视图环在「对话」「轨迹」右侧新增**记忆**选项卡，对应 pi 版的 `/om:status` 与 `/om:view` 命令，内容经插件注册的 Typert Remote 端点（`observationalMemory/status|view|logs`）由宿主实时生成：
+对话上方的视图环在「对话」「轨迹」右侧新增**记忆**选项卡，对应 pi 版的 `/om:status` 与 `/om:view` 命令，内容经插件注册的 Typert Remote 端点（`observationalMemory/status|view|run|logs`）由宿主实时生成：
 
 - **状态**：记忆清单（已记录/已清理/活跃/可见 观察数与反思数、漂移统计）、各 worker 的进度条（距下次观察/反思/压缩的 token 进度，含 ratio 模式标注）、在途任务与最近的 worker 错误。
 - **记忆内容**：`/om:view` 的内容，可在「当前可见」（最近一次压缩后代理实际可见的记忆）与「完整记录」（账本全量）之间切换；复制按钮把当前内容写入剪贴板。
 - **调试日志**：`debugLog` 开启时显示该会话 NDJSON 调试事件的尾部（默认 200 行）。
+
+工具栏的**立即运行**按钮手动触发一次完整整合（观察 → 反思 → 清理），绕过被动开关与 token 阈值（空积压仍然不产生模型调用）；已有任务在途时不会重复触发。这是被动模式下保留的主动入口，主动模式下同样可用。
 
 选项卡在打开时拉取一次，之后用「刷新」按钮更新；不会轮询。
 
@@ -123,6 +125,8 @@ dsh plugin --profile web add /absolute/path/to/dsh-observational-memory
 ### 回退按钮
 
 每条用户消息（含 steering 消息）下方、「复制」左侧新增**回退**按钮：点击后在**该消息之前**的最近已完成轮次边界处分叉出一个新会话（fork），打开新会话，并把该消息的原文放回其输入框——可以修改后重新发送。整个过程非破坏性：原会话历史原样保留在自己的分支上。
+
+新分支在首次触及记忆时**继承**原会话截至分叉点的记忆（观察、反思、清理记录与可见记忆），回退后无需从零积累；仅覆盖被放弃分支（分叉点之后事件）的记录不随分叉转移。父分支账本为空时会沿分叉链向上找到最近可用的账本，因此连续回退也能继承。被动模式不影响继承。
 
 DSH 只能按轮次边界切分会话，因此按钮在以下情况保持禁用（悬停有提示）：首轮消息（之前没有可回退的边界）、纯附件或含附件的消息（草稿无法还原附件）、无文本消息。卸载本插件后，用户消息渲染恢复原样。
 
@@ -149,7 +153,7 @@ DSH 只能按轮次边界切分会话，因此按钮在以下情况保持禁用�
 | `model` | 会话模型 | 记忆 worker 的模型覆盖：`{ provider, id, reasoningEffort? }`；设置卡片中从 DSH 已添加的模型列表按 提供商 → 模型 → 推理强度 逐级下拉选择 |
 | `modelFallbackAfterFailures` | `0` | 记忆 worker 连续失败这么多次后，挂起模型覆盖并回退到会话模型；`0` 表示永不回退。仅在配置了 `model` 覆盖时生效；override 路径成功、修改配置或会话重载后重新计数 |
 | `showWorkerNotifications` | `true` | 在主机日志记录 worker 进度（警告与错误始终记录） |
-| `passive` | `false` | 被动模式：关闭全部主动后台触发 |
+| `passive` | `false` | 被动模式：关闭全部主动后台触发（记忆选项卡的「立即运行」、手动/DSH 压缩与 recall 不受影响） |
 | `debugLog` | `false` | 在存储目录下写每个会话的 NDJSON 调试事件 |
 | `storageDir` | `$DSH_HOME/observational-memory` | 账本存储根目录 |
 
@@ -208,6 +212,7 @@ npm run build       # 构建 lib/index.js（宿主 ESM）+ lib/client.js（浏�
 | `tests/recall-tool.test.ts` | recall 工具注册与证据恢复 |
 | `tests/memory-controller.test.ts`、`tests/memory-view.test.tsx` | 记忆选项卡控制器与视图 |
 | `tests/rollback.test.ts`、`tests/user-message*.test.tsx` | 回退按钮门控与交互 |
+| `tests/inheritance.test.ts` | 分叉/回退后的账本继承（边界过滤、分叉链、被动模式） |
 | `tests/serialize.test.ts` | 源事件序列化与 token 估算 |
 
 ### 本地联调
@@ -228,7 +233,7 @@ src/
   index.ts            插件入口（Config schema、settings 命名空间、各触发器与工具注册）
   config.ts           配置 schema 与派生预算（含 ratio 模式阈值解析）
   runtime.ts          共享运行时（配置热更新、模型解析、在途保护、错误记忆）
-  api.ts              Typert Remote 服务（observationalMemory/status|view|logs，供记忆选项卡）
+  api.ts              Typert Remote 服务（observationalMemory/status|view|run|logs，供记忆选项卡）
   report.ts           /om:status、/om:view 报告文本构建（纯函数）
   ledger/             记忆账本核心（types/fold/projection/progress/render/recall/store）
   workers/            观察器/反思器/清理器（loop + prompts + coverage + pool）
