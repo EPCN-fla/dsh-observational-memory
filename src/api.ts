@@ -5,13 +5,15 @@
  * `/om:status` and `/om:view` exist in the pi reference as interactive slash
  * commands; DSH surfaces their content in the conversation's Memory view tab
  * instead, so these endpoints return the rendered report text. Debug logs
- * (written when `debugLog` is on) are returned as a bounded tail.
+ * (written when `debugLog` is on) are returned as a bounded tail, and `run`
+ * backs the tab's manual "run now" consolidation action.
  */
 import { open } from 'node:fs/promises'
 import type { Context } from '@deepseek-ai/cordis'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import { Remote, RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import { debugLogPath } from './debug-log.ts'
+import { runConsolidationNow } from './hooks/consolidation.ts'
 import { buildStatusText, buildViewText, type ViewMode } from './report.ts'
 import { storageRoot, type OmRuntime } from './runtime.ts'
 
@@ -46,6 +48,11 @@ export interface OmTextValue {
 export interface OmLogsValue extends OmTextValue {
   /** Whether debugLog recording is on; when off there is never text. */
   enabled: boolean
+}
+
+export interface OmRunValue {
+  /** Whether this call ran the pipeline (false: busy, or not a memory session). */
+  ran: boolean
 }
 
 /** Bounded log tail: enough for a debugging session, small enough for RPC. */
@@ -158,6 +165,20 @@ export class OmApiService extends TypertRemoteService {
     if (session) await this.runtime.ensureInherited(this.ctx, session)
     const entries = await this.runtime.store.load(sessionId)
     return { text: buildViewText(entries, mode) }
+  }
+
+  /**
+   * The Memory tab's "run now": one forced consolidation pass (observer →
+   * reflector → dropper) for an attached session. The manual entry passive
+   * mode keeps available: it bypasses the passive switch and the token
+   * clocks, but not the per-session in-flight guard.
+   */
+  @Remote('run')
+  async run(request: OmSessionRequest, signal?: AbortSignal): Promise<OmRunValue> {
+    const sessionId = sessionIdOf(request)
+    const session = attachedSession(this.ctx, sessionId)
+    const ran = await runConsolidationNow(this.ctx, this.runtime, session)
+    return { ran }
   }
 
   /** Bounded tail of the session's debug NDJSON, when recording is on. */

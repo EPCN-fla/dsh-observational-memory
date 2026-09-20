@@ -35,6 +35,8 @@ export interface OmMemoryState {
   /** Epoch ms of the last successful refresh. */
   refreshedAt: number | undefined
   refreshing: boolean
+  /** A manual "run now" consolidation pass is in flight on the host. */
+  running: boolean
 }
 
 const INITIAL: OmMemoryState = {
@@ -47,6 +49,7 @@ const INITIAL: OmMemoryState = {
   error: undefined,
   refreshedAt: undefined,
   refreshing: false,
+  running: false,
 }
 
 interface TextResult {
@@ -57,12 +60,20 @@ interface LogsResult extends TextResult {
   enabled: boolean
 }
 
+interface RunResult {
+  ran: boolean
+}
+
 function isTextResult(value: unknown): value is TextResult {
   return typeof value === 'object' && value !== null && typeof (value as { text?: unknown }).text === 'string'
 }
 
 function isLogsResult(value: unknown): value is LogsResult {
   return isTextResult(value) && typeof (value as { enabled?: unknown }).enabled === 'boolean'
+}
+
+function isRunResult(value: unknown): value is RunResult {
+  return typeof value === 'object' && value !== null && typeof (value as { ran?: unknown }).ran === 'boolean'
 }
 
 export class OmMemoryController {
@@ -129,7 +140,29 @@ export class OmMemoryController {
       error: error && !error.ok ? error.message : undefined,
       refreshedAt: error === undefined ? Date.now() : this.current.refreshedAt,
       refreshing: false,
+      running: this.current.running,
     })
+  }
+
+  /**
+   * Force one consolidation pass on the host (`observationalMemory/run`),
+   * then re-pull the reports so the tab reflects whatever it produced. This
+   * is the proactive entry passive mode keeps: with background triggers off,
+   * the user runs memory work explicitly from here.
+   */
+  async run(): Promise<void> {
+    const generation = ++this.generation
+    this.publish({ ...this.current, running: true, error: undefined })
+    const run = await this.attempt(this.fetch('observationalMemory/run', { sessionId: this.sessionId }, isRunResult))
+    if (generation !== this.generation) return
+    if (!run.ok) {
+      this.publish({ ...this.current, running: false, error: run.message })
+      return
+    }
+    await this.refresh()
+    // refresh() re-published a full snapshot; only the flag flip remains.
+    if (generation + 1 !== this.generation) return
+    this.publish({ ...this.current, running: false })
   }
 
   /** Switch the `/om:view` projection and refetch just that section. */

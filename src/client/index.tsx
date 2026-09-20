@@ -89,6 +89,7 @@ const dictionaries: Record<string, Record<string, string>> = { zh, en }
 interface MemoryInjected {
   hooks: { memory: OmMemoryController }
   refresh: () => void
+  run: () => void
   setViewMode: (mode: MemoryViewMode) => void
 }
 
@@ -198,6 +199,7 @@ export function apply(ctx: Context): void {
           return {
             hooks: { memory },
             refresh: () => void memory.refresh(),
+            run: () => void memory.run(),
             setViewMode: (mode) => void memory.setViewMode(mode),
           }
         }) as never,

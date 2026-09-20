@@ -4,6 +4,10 @@
  * persisted `turn/end` session event and by `agent/session-start` (a resumed
  * session may already carry an unobserved backlog).
  *
+ * {@link runConsolidationNow} is the manual entry behind the Memory tab's
+ * "run now" action: passive mode's proactive surface, bypassing the passive
+ * switch and the token clocks on the user's explicit request.
+ *
  * Observer work has priority within a run: the reflector and dropper stages
  * still execute after it, in order, exactly like pi-observational-memory's
  * single consolidation pipeline.
@@ -35,6 +39,11 @@ import { runReflector } from '../workers/reflector.ts'
 import { observationPoolMetrics } from '../workers/pool.ts'
 
 type ResolvedModel = Extract<ResolveResult, { ok: true }>
+
+/** Pipeline switches: `force` bypasses the token clocks (manual runs only). */
+export interface ConsolidationOptions {
+  force?: boolean
+}
 
 type Notify = (level: 'info' | 'warning', message: string) => void
 
@@ -98,8 +107,39 @@ export async function maybeLaunchConsolidation(ctx: Context, runtime: OmRuntime,
   }
 }
 
+/**
+ * The manual consolidation entry behind the Memory tab's "run now" action —
+ * passive mode's proactive surface. The user's explicit request bypasses the
+ * passive switch and the token clocks (stages still no-op over an empty
+ * backlog), while the per-session in-flight guard still applies.
+ *
+ * Returns false for subagent sessions (no memory of their own) and when a
+ * run is already active for the session.
+ */
+export async function runConsolidationNow(ctx: Context, runtime: OmRuntime, session: Session): Promise<boolean> {
+  if (session.header.origin === 'subagent') return false
+  const sessionId: string = session.id
+  if (runtime.consolidationInFlight.has(sessionId)) return false
+  // Claim the slot synchronously — before the first await — so a double
+  // click cannot double-run the pipeline.
+  runtime.consolidationInFlight.add(sessionId)
+  try {
+    await runtime.ensureInherited(ctx, session)
+    runtime.clearStageErrors(sessionId)
+    await runConsolidationPipeline(ctx, runtime, session, { force: true })
+    return true
+  } finally {
+    runtime.consolidationInFlight.delete(sessionId)
+  }
+}
+
 /** Exported for tests; `maybeLaunchConsolidation` is the production caller. */
-export async function runConsolidationPipeline(ctx: Context, runtime: OmRuntime, session: Session): Promise<void> {
+export async function runConsolidationPipeline(
+  ctx: Context,
+  runtime: OmRuntime,
+  session: Session,
+  options: ConsolidationOptions = {},
+): Promise<void> {
   const notify = makeNotify(ctx, runtime)
   const sessionId: string = session.id
   let agent: Agent | undefined
@@ -125,7 +165,7 @@ export async function runConsolidationPipeline(ctx: Context, runtime: OmRuntime,
   }
 
   try {
-    await runObserverStage(ctx, runtime, session, resolveModel, notify)
+    await runObserverStage(ctx, runtime, session, resolveModel, notify, options)
   } catch (error) {
     const { message, consecutiveFailures } = runtime.recordStageError(sessionId, 'observer', error)
     runtime.debug(sessionId, 'observer.error', { errorMessage: message, consecutiveFailures })
@@ -135,7 +175,7 @@ export async function runConsolidationPipeline(ctx: Context, runtime: OmRuntime,
 
   let reflectorResult: { reflections: Reflection[]; coverageSeq?: number }
   try {
-    reflectorResult = await runReflectorStage(ctx, runtime, session, resolveModel, notify)
+    reflectorResult = await runReflectorStage(ctx, runtime, session, resolveModel, notify, options)
   } catch (error) {
     const { message, consecutiveFailures } = runtime.recordStageError(sessionId, 'reflector', error)
     runtime.debug(sessionId, 'reflector.error', { errorMessage: message, consecutiveFailures })
@@ -158,22 +198,25 @@ async function runObserverStage(
   session: Session,
   resolveModel: () => Promise<ResolvedModel | undefined>,
   notify: Notify,
+  options: ConsolidationOptions = {},
 ): Promise<void> {
   const sessionId: string = session.id
   const config = runtime.config
   const entries = await runtime.store.load(sessionId)
   const events = session.snapshotEvents()
   const tokens = rawTokensSinceObservationCoverage(events, entries)
-  if (tokens < config.observeAfterTokens) return
+  // A manual run ignores the clock; an empty backlog still no-ops below.
+  if (!options.force && tokens < config.observeAfterTokens) return
 
   const coverageSeq = latestCoverageSeq(entries, 'observations-recorded')
 
   // Deliberate-empty backoff: an intentional "nothing to record" verdict must
   // not re-fire every turn over the same span; retry after another
   // observeAfterTokens worth of source text, and drop the backoff as soon as
-  // coverage advances.
+  // coverage advances. A manual run is the user's explicit retry, so it
+  // ignores the backoff.
   const backoff = runtime.observerEmptyBackoff.get(sessionId)
-  if (backoff) {
+  if (!options.force && backoff) {
     if (coverageSeq !== backoff.coverageSeq || tokens >= backoff.tokensAtEmpty + config.observeAfterTokens) {
       runtime.observerEmptyBackoff.delete(sessionId)
     } else {
@@ -252,16 +295,20 @@ async function runReflectorStage(
   session: Session,
   resolveModel: () => Promise<ResolvedModel | undefined>,
   notify: Notify,
+  options: ConsolidationOptions = {},
 ): Promise<{ reflections: Reflection[]; coverageSeq?: number }> {
   const sessionId: string = session.id
   const config = runtime.config
   const entries = await runtime.store.load(sessionId)
   const events = session.snapshotEvents()
   const reflectionTokens = rawTokensSinceReflectionCoverage(events, entries)
-  if (reflectionTokens < config.reflectAfterTokens) return { reflections: [] }
+  if (!options.force && reflectionTokens < config.reflectAfterTokens) return { reflections: [] }
 
   const observationCoverageSeq = latestCoverageSeq(entries, 'observations-recorded')
   if (observationCoverageSeq < 0) return { reflections: [] }
+  // A manual run reflects on demand, but with an empty observation pool
+  // there is nothing to crystallize; skip the model call entirely.
+  if (options.force && foldLedger(entries).activeObservations.length === 0) return { reflections: [] }
 
   const resolved = await resolveModel()
   if (!resolved) return { reflections: [] }

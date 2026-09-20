@@ -66,6 +66,62 @@ describe('OmMemoryController', () => {
     expect(rpc.calls).toEqual(['observationalMemory/view'])
   })
 
+  it('runs a manual consolidation on the host, then re-pulls the reports', async () => {
+    const rpc = fakeRpc({
+      'observationalMemory/run': () => ({ ran: true }),
+      'observationalMemory/status': () => ({ text: 'STATUS' }),
+      'observationalMemory/view': () => ({ text: 'VIEW' }),
+      'observationalMemory/logs': () => ({ enabled: false, text: '' }),
+    })
+    const controller = new OmMemoryController(rpc, 'session-1')
+    await controller.run()
+    const state = controller.getSnapshot()
+    expect(state.running).toBe(false)
+    expect(state.error).toBeUndefined()
+    expect(state.statusText).toBe('STATUS')
+    expect(rpc.calls).toEqual([
+      'observationalMemory/run',
+      'observationalMemory/status',
+      'observationalMemory/view',
+      'observationalMemory/logs',
+    ])
+  })
+
+  it('flags the run as in flight until the host settles', async () => {
+    let release: (value: unknown) => void = () => {}
+    const gate = new Promise((resolve) => {
+      release = resolve
+    })
+    const rpc: ConnectionRpcLike = {
+      async call(_channel, endpoint) {
+        if (endpoint === 'observationalMemory/run') return (await gate) as never
+        return { ok: true, value: { text: '', enabled: false } }
+      },
+    }
+    const controller = new OmMemoryController(rpc, 'session-1')
+    const pending = controller.run()
+    expect(controller.getSnapshot().running).toBe(true)
+    release({ ok: true, value: { ran: true } })
+    await pending
+    expect(controller.getSnapshot().running).toBe(false)
+  })
+
+  it('surfaces a failed run and keeps showing the previous reports', async () => {
+    const rpc: ConnectionRpcLike = {
+      async call(_channel, endpoint) {
+        if (endpoint === 'observationalMemory/run') {
+          return { ok: false, error: { code: 'test/boom', message: 'run exploded' } }
+        }
+        return { ok: true, value: { text: '', enabled: false } }
+      },
+    }
+    const controller = new OmMemoryController(rpc, 'session-1')
+    await controller.run()
+    const state = controller.getSnapshot()
+    expect(state.running).toBe(false)
+    expect(state.error).toBe('run exploded')
+  })
+
   it('drops a stale response issued before a newer refresh', async () => {
     let release: (value: unknown) => void = () => {}
     const gate = new Promise((resolve) => {
