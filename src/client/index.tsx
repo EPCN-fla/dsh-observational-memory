@@ -9,7 +9,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { ReactNode } from 'react'
 import { ObservationalMemoryCard } from './card.tsx'
-import { CARD_FIELDS, OmCardController, type SettingsScopeLike } from './controller.ts'
+import { adaptConfigForm, CARD_FIELDS, OmCardController, type ConfigFormsLike, type SettingsScopeLike } from './controller.ts'
 import { en, LOCALE_NAMESPACE, zh } from './locales.ts'
 import { MemoryView } from './memory.tsx'
 import { OmMemoryController, type ConnectionRpcLike, type MemoryViewMode } from './memory.ts'
@@ -17,7 +17,10 @@ import type { RollbackEventView } from './rollback.ts'
 import { OmUserMessageNodeView, type RollbackInjected } from './user-message.tsx'
 
 export const name = 'dsh-observational-memory-ui'
-export const inject = ['slots', 'locale', 'settingsScope', 'connection', 'sessions', 'conversation']
+// No settingsScope/configForms in the static inject list: each exists on only
+// one host generation, and a missing static inject never activates. The
+// settings binding resolves dynamically in apply instead.
+export const inject = ['slots', 'locale', 'connection', 'sessions', 'conversation']
 
 /** The settings namespace joining the host half and this card. */
 const NS = LOCALE_NAMESPACE
@@ -103,8 +106,15 @@ export function apply(ctx: Context): void {
 
   // The settings card edits the namespace and lists the Host model catalog
   // (session/modelCatalog over the Connection RPC channel) in its provider →
-  // model → reasoning-effort dropdowns.
-  const controller = new OmCardController(ctx.settingsScope.bind({ namespace: NS }), CARD_FIELDS, ctx.connection.rpc)
+  // model → reasoning-effort dropdowns. The namespace binding follows the
+  // host generation: DSH ≥0.1.7 serves the entry's live configuration form
+  // (values persist into the profile's cordis.patch.yml); DSH ≤0.1.5 binds
+  // the legacy settings scope (the settings.yaml document).
+  const configForms = ctx.get('configForms') as ConfigFormsLike | undefined
+  const scope: SettingsScopeLike = configForms !== undefined
+    ? adaptConfigForm(configForms.get(NS))
+    : ctx.settingsScope.bind({ namespace: NS })
+  const controller = new OmCardController(scope, CARD_FIELDS, ctx.connection.rpc)
 
   ctx.slots.inject('settings.plugin.item', () =>
     ctx.slots.register(

@@ -28,6 +28,38 @@ export interface SettingsScopeLike {
   unset(field: string): Promise<void>
 }
 
+/**
+ * The DSH ≥0.1.7 configuration-form face (`ctx.configForms.get(entryId)`),
+ * declared locally because the client type surface is not shared across host
+ * generations. Snapshot fields are a structural superset of the legacy
+ * settings scope's; writes resolve whether the Host accepted them.
+ */
+export interface ConfigFormLike {
+  getSnapshot(): ReturnType<SettingsScopeLike['getSnapshot']> & { mode: 'host' | 'memory' }
+  subscribe(listener: () => void): () => void
+  set(field: string, value: unknown): Promise<boolean>
+  unset(field: string): Promise<void> | Promise<boolean>
+}
+
+/** The DSH ≥0.1.7 `configForms` client service slice this plugin consumes. */
+export interface ConfigFormsLike {
+  get<T>(entryId: string): ConfigFormLike
+}
+
+/**
+ * Project a DSH ≥0.1.7 configuration form onto the settings-scope contract:
+ * the acceptance boolean is dropped (a refused write folds the Host state
+ * back into the mirror, which the snapshot subscription surfaces).
+ */
+export function adaptConfigForm(form: ConfigFormLike): SettingsScopeLike {
+  return {
+    getSnapshot: () => form.getSnapshot(),
+    subscribe: (listener) => form.subscribe(listener),
+    set: (field, value) => form.set(field, value).then(() => {}),
+    unset: (field) => form.unset(field).then(() => {}),
+  }
+}
+
 /** Minimal snapshot store the slot renderer binds as a selector hook. */
 export interface SnapshotStoreLike<T> {
   getSnapshot(): T
