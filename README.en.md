@@ -57,7 +57,7 @@ Differences from the Pi version (platform adaptations):
 
 ## Install
 
-Requires deepseek-harness **0.1.5-rc.2 or 0.1.7-rc.1** (`@deepseek-ai/dsh-*` packages ≥ 0.1.5-rc.2; on 0.1.7 the plugin serves the profile-owned live configuration, on 0.1.5 it falls back to the legacy settings.yaml section, and the legacy document is imported automatically on the first 0.1.7 boot).
+Requires deepseek-harness **the 0.1.5 prerelease line ≥ rc.2, or 0.1.7-rc.1** (`@deepseek-ai/dsh-*` peer range `>=0.1.5-rc.2 <0.1.5 || 0.1.7-rc.1`; on 0.1.7 the plugin serves the profile-owned live configuration, on 0.1.5 it falls back to the legacy settings.yaml section, and the legacy document is imported automatically on the first 0.1.7 boot).
 
 Add the plugin to a profile through the DSH CLI (`web` shown here; substitute as needed). The package ships a `cordis.patch.yml`, so the composer mounts the host half automatically and serves `/plugins/dsh-observational-memory/client.js` to the Web client — no extra composition wiring.
 
