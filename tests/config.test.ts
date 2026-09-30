@@ -127,10 +127,19 @@ describe('resolveObservationsPoolTargetTokens', () => {
 })
 
 describe('live (volatile) configuration', () => {
-  it('marks every editable schema field volatile for the DSH ≥0.1.7 settings transport', () => {
-    const dict = (Config as unknown as { dict: Record<string, { meta: { volatile?: boolean } }> }).dict
-    for (const [key, field] of Object.entries(dict)) {
-      expect(field.meta.volatile, `field ${key}`).toBe(true)
+  it('wraps every resolved field in a live reference for the DSH ≥0.1.7 settings transport', () => {
+    // Behavioral assertion (no schemastery internals): calling the entry
+    // schema yields Volatile refs for the volatile-marked fields, while the
+    // plain face yields plain values.
+    const wrapped = Config({ observeAfterTokens: 5000, storageDir: '/tmp/om' }) as Record<string, unknown>
+    expect(Object.keys(wrapped).length).toBeGreaterThan(0)
+    for (const [key, value] of Object.entries(wrapped)) {
+      expect(typeof (value as { get?: unknown })?.get, `field ${key}`).toBe('function')
+    }
+    expect((wrapped.observeAfterTokens as { get(): number }).get()).toBe(5000)
+    const plain = PlainConfig({ observeAfterTokens: 5000, storageDir: '/tmp/om' }) as Record<string, unknown>
+    for (const value of Object.values(plain)) {
+      expect(typeof (value as { get?: unknown })?.get).not.toBe('function')
     }
   })
 
