@@ -312,6 +312,8 @@ describe('ObservationalMemoryRowConfig (DSH ≥0.1.7 Plugins page entry)', () =>
         }),
       )
     })
-    expect(container.querySelector('button[aria-expanded]')).not.toBeNull()
+    const header = container.querySelector<HTMLButtonElement>('button[aria-expanded]')
+    expect(header).not.toBeNull()
+    expect(header!.getAttribute('aria-expanded')).toBe('true')
   })
 })

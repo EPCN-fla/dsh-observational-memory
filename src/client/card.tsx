@@ -20,6 +20,8 @@ export interface ObservationalMemoryCardProps {
   save: OmCardFace['save']
   discard: OmCardFace['discard']
   retryCatalog: OmCardFace['retryCatalog']
+  /** Start expanded (the plugin-manager page view renders the form itself). */
+  initialOpen?: boolean
 }
 
 interface NumberFieldDef {
@@ -237,7 +239,7 @@ function ModelSelect(props: {
 export function ObservationalMemoryCard(props: ObservationalMemoryCardProps) {
   const { t } = props
   const state = props.useOmCard((snapshot) => snapshot)
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(props.initialOpen ?? false)
   const saveStarted = useRef(false)
 
   // Collapse only after a Host-confirmed save; a failed write keeps its
@@ -454,11 +456,14 @@ export function ObservationalMemoryCard(props: ObservationalMemoryCardProps) {
 
 /**
  * The DSH ≥0.1.7 plugin-manager row-configuration entry: the Plugins page
- * asks for `summary` (the row's one-liner, also the missing-description
- * fallback) or `page` (the form with its save control). Older hosts never
- * declare the slot, so this component is only ever rendered there.
+ * always passes `view` — `summary` for the row's one-liner (also the
+ * missing-description fallback), `page` for the form with its save control.
+ * Older hosts never declare the slot, so this component is only ever
+ * rendered there.
  */
-export function ObservationalMemoryRowConfig(props: ObservationalMemoryCardProps & { view?: 'summary' | 'page' }) {
-  if (props.view === 'summary') return props.t('card.description') as unknown as ReturnType<typeof ObservationalMemoryCard>
-  return <ObservationalMemoryCard {...props} />
+export function ObservationalMemoryRowConfig(props: ObservationalMemoryCardProps & { view: 'summary' | 'page' }) {
+  if (props.view === 'summary') return <>{props.t('card.description')}</>
+  // The page view IS the configuration page: render the form expanded, not
+  // hidden behind the collapsible card chrome the settings-list row uses.
+  return <ObservationalMemoryCard {...props} initialOpen />
 }
