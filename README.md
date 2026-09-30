@@ -57,7 +57,7 @@ flowchart TD
 
 ## 安装
 
-要求：deepseek-harness **0.1.5-rc.2**（`@deepseek-ai/dsh-*` 包 ≥ 0.1.5-rc.2）。
+要求：deepseek-harness **0.1.5-rc.2 或 0.1.7-rc.1**（`@deepseek-ai/dsh-*` 包 ≥ 0.1.5-rc.2；插件在 0.1.7 上使用 Profile 持有的实时配置，在 0.1.5 上回退到经典 settings.yaml 设置节，旧设置文档在 0.1.7 首次启动时自动导入）。
 
 通过 DSH CLI 把插件加入指定的 Profile（这里以 `web` 为例，按需替换）。本包自带 `cordis.patch.yml`，组合器会自动挂载 host 半端，并向 Web 客户端提供 `/plugins/dsh-observational-memory/client.js`——安装后无需额外的组合配置。
 
