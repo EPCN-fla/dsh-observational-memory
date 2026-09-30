@@ -20,8 +20,6 @@ import {
   type ToolSchema,
 } from '@deepseek-ai/dsh-llm'
 
-export const WORKER_PLUGIN_NAME = 'dsh-observational-memory'
-
 // DSH 0.1.7 removed the shared `plugin` message-source kind: every producer
 // now declares its own kind through module augmentation ("user messages
 // carry any producer's kind"). Declaring it here keeps the same source shape
