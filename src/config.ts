@@ -173,7 +173,11 @@ export const Config = z.object(
  * {@link resolveConfig} and by the legacy (DSH ≤0.1.5) settings section,
  * whose host machinery predates live references.
  */
-export const PlainConfig: z<Config> = z.object(fields)
+// Cast: with a mixed schemastery installation (e.g. a 0.1.5-rc.3 host pinning
+// 3.18.2 beside this plugin's 3.18.4) the two copies' Schema declarations
+// defeat the object-literal inference; the annotation above already names the
+// intended input shape.
+export const PlainConfig: z<Config> = z.object(fields) as z<Config>
 
 /**
  * Minimal shape of the live-configuration reference DSH ≥0.1.7 hands each
