@@ -8,7 +8,7 @@
  */
 import type { Context } from '@deepseek-ai/cordis'
 import type { ReactNode } from 'react'
-import { ObservationalMemoryCard } from './card.tsx'
+import { ObservationalMemoryCard, ObservationalMemoryRowConfig } from './card.tsx'
 import { adaptConfigForm, CARD_FIELDS, OmCardController, type ConfigFormsLike, type SettingsScopeLike } from './controller.ts'
 import { en, LOCALE_NAMESPACE, zh } from './locales.ts'
 import { MemoryView } from './memory.tsx'
@@ -125,6 +125,23 @@ export function apply(ctx: Context): void {
         inject: () => controller.inject() as unknown as Record<string, unknown>,
       },
       ObservationalMemoryCard as never,
+    ),
+  )
+
+  // DSH ≥0.1.7 — the Plugins page's row-configuration slot, keyed
+  // `<package name>#<row id>` (the row id this package's cordis.patch.yml
+  // declares). The retired settings.plugin.item above is never declared on
+  // that host, this one is never declared on 0.1.5 — ctx.slots.inject waits
+  // for the declaration harmlessly in both directions.
+  ctx.slots.inject('plugins.row.config', () =>
+    ctx.slots.register(
+      {
+        name: 'plugins.row.config',
+        key: 'dsh-observational-memory#observational-memory',
+        locale: NS,
+        inject: () => controller.inject() as unknown as Record<string, unknown>,
+      },
+      ObservationalMemoryRowConfig as never,
     ),
   )
 

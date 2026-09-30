@@ -266,3 +266,52 @@ describe('ObservationalMemoryCard model cascade', () => {
     expect((scope.getSnapshot().user as Record<string, unknown>).model).toBeUndefined()
   })
 })
+
+describe('ObservationalMemoryRowConfig (DSH ≥0.1.7 Plugins page entry)', () => {
+  it('renders the one-liner for the summary view', async () => {
+    const { ObservationalMemoryRowConfig } = await import('../src/client/card.tsx')
+    const controller = new OmCardController(fakeScope({}), CARD_FIELDS, catalogRpc)
+    const face = controller.inject()
+    const useOmCard = <S,>(selector: (state: OmCardState) => S): S =>
+      useSyncExternalStore(face.hooks.omCard.subscribe, () => selector(face.hooks.omCard.getSnapshot()))
+    act(() => {
+      root.render(
+        createElement(ObservationalMemoryRowConfig, {
+          t,
+          useOmCard,
+          edit: face.edit,
+          resetField: face.resetField,
+          save: face.save,
+          discard: face.discard,
+          retryCatalog: face.retryCatalog,
+          view: 'summary',
+        }),
+      )
+    })
+    expect(container.textContent).toBe(en['card.description'])
+    expect(container.querySelector('button[aria-expanded]')).toBeNull()
+  })
+
+  it('renders the full card for the page view', async () => {
+    const { ObservationalMemoryRowConfig } = await import('../src/client/card.tsx')
+    const controller = new OmCardController(fakeScope({}), CARD_FIELDS, catalogRpc)
+    const face = controller.inject()
+    const useOmCard = <S,>(selector: (state: OmCardState) => S): S =>
+      useSyncExternalStore(face.hooks.omCard.subscribe, () => selector(face.hooks.omCard.getSnapshot()))
+    act(() => {
+      root.render(
+        createElement(ObservationalMemoryRowConfig, {
+          t,
+          useOmCard,
+          edit: face.edit,
+          resetField: face.resetField,
+          save: face.save,
+          discard: face.discard,
+          retryCatalog: face.retryCatalog,
+          view: 'page',
+        }),
+      )
+    })
+    expect(container.querySelector('button[aria-expanded]')).not.toBeNull()
+  })
+})

@@ -451,3 +451,14 @@ export function ObservationalMemoryCard(props: ObservationalMemoryCardProps) {
     </li>
   )
 }
+
+/**
+ * The DSH ≥0.1.7 plugin-manager row-configuration entry: the Plugins page
+ * asks for `summary` (the row's one-liner, also the missing-description
+ * fallback) or `page` (the form with its save control). Older hosts never
+ * declare the slot, so this component is only ever rendered there.
+ */
+export function ObservationalMemoryRowConfig(props: ObservationalMemoryCardProps & { view?: 'summary' | 'page' }) {
+  if (props.view === 'summary') return props.t('card.description') as unknown as ReturnType<typeof ObservationalMemoryCard>
+  return <ObservationalMemoryCard {...props} />
+}
