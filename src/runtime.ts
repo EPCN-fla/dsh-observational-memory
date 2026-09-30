@@ -113,12 +113,23 @@ export class OmRuntime {
   /**
    * Re-read the bound live-config source, applying any drift through
    * {@link setConfig}. On DSH ≥0.1.7 the source's volatile refs track profile
-   * edits in place (no notification), so trigger entry points call this
-   * before reading `config`; on older hosts the legacy settings section's
-   * onChange still delivers immediate updates and the poll is a no-op.
+   * edits in place (the loader's volatile-update signal is internal to the
+   * owning fiber, so trigger entry points poll here before reading `config`);
+   * on older hosts the legacy settings section's onChange still delivers
+   * immediate updates and the poll is a no-op.
+   *
+   * A source value that fails schema validation is rejected WITHOUT throwing:
+   * polls run inside host paths that must not break (compaction's llm/stream
+   * waterfall, agent/status dispatch), so the last good epoch stays effective
+   * and the rejection is only logged.
    */
   refreshConfig(): void {
-    if (this.configSource !== undefined) this.setConfig(this.configSource())
+    if (this.configSource === undefined) return
+    try {
+      this.setConfig(this.configSource())
+    } catch (error) {
+      this.onError(`[observational-memory] rejected an invalid live config edit; keeping the previous values: ${error instanceof Error ? error.message : String(error)}`)
+    }
   }
 
   /** Bind the live-config source {@link refreshConfig} polls. */

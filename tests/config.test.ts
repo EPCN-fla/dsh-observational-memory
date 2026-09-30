@@ -191,3 +191,25 @@ describe('OmRuntime config epochs', () => {
     expect(runtime.config.observeAfterTokens).toBe(5000)
   })
 })
+
+describe('refreshConfig fault tolerance', () => {
+  it('rejects an invalid live edit without throwing and keeps the last good epoch', async () => {
+    const { OmRuntime } = await import('../src/runtime.ts')
+    const errors: string[] = []
+    let current: unknown = 10_000
+    const runtime = new OmRuntime(resolveConfig({ storageDir: dir }), { onError: (m) => errors.push(m) })
+    runtime.bindConfigSource(() => ({ storageDir: dir, observeAfterTokens: current } as never))
+    runtime.refreshConfig()
+    expect(runtime.config.observeAfterTokens).toBe(10_000)
+    // Below the schema minimum: the poll must not throw into the host path.
+    current = 0
+    expect(() => runtime.refreshConfig()).not.toThrow()
+    expect(runtime.config.observeAfterTokens).toBe(10_000)
+    expect(errors).toHaveLength(1)
+    expect(errors[0]).toContain('rejected an invalid live config edit')
+    // A later valid edit applies normally.
+    current = 5000
+    runtime.refreshConfig()
+    expect(runtime.config.observeAfterTokens).toBe(5000)
+  })
+})
