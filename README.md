@@ -61,13 +61,13 @@ flowchart TD
 
 通过 DSH CLI 把插件加入指定的 Profile（这里以 `web` 为例，按需替换）。本包自带 `cordis.patch.yml`，组合器会自动挂载 host 半端，并向 Web 客户端提供 `/plugins/dsh-observational-memory/client.js`——安装后无需额外的组合配置。
 
-### From npm
+### 从 npm 安装
 
 ```sh
 dsh plugin --profile web add dsh-observational-memory
 ```
 
-### From GitHub
+### 从 GitHub 安装
 
 ```sh
 dsh plugin --profile web add github:EPCN-fla/dsh-observational-memory
@@ -75,7 +75,7 @@ dsh plugin --profile web add github:EPCN-fla/dsh-observational-memory
 
 通过 git 源安装时，npm 会执行包的 `prepare` 脚本自动完成构建（要求 Node `^22.19.0` 或 `>=24`）。
 
-### From tarball
+### 从 tarball 安装
 
 ```sh
 git clone https://github.com/EPCN-fla/dsh-observational-memory.git
@@ -86,7 +86,7 @@ npm pack        # 产出 dsh-observational-memory-<version>.tgz
 dsh plugin --profile web add ./dsh-observational-memory-<version>.tgz
 ```
 
-### Local development
+### 本地开发
 
 开发期也可以把 CLI 直接指向工作副本目录；每次改动后重新 `npm run build` 即可生效：
 
