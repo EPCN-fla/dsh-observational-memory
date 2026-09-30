@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Session } from '@deepseek-ai/dsh-session'
 import { PlainConfig } from '../src/config.ts'
-import { maybeLaunchConsolidation, runConsolidationNow } from '../src/hooks/consolidation.ts'
+import { maybeLaunchConsolidation, registerConsolidationTrigger, runConsolidationNow } from '../src/hooks/consolidation.ts'
 import { buildObservationsRecorded, buildReflectionsRecorded } from '../src/ledger/index.ts'
 import type { EventView } from '../src/serialize.ts'
 import { hashId } from '../src/ids.ts'
@@ -505,21 +505,25 @@ describe('consolidation triggers', () => {
   it('subscribes to agent/created (agent/session-start was removed in DSH 0.1.6) and launches on creation', async () => {
     const events = longConversation(20)
     const { ctx, callCount } = fakeCtx([{ text: 'nothing worth recording' }])
-    const handlers = new Map<string, (...args: never[]) => void>()
+    // Multi-map: a future second listener on one event must not vanish from
+    // the assertion surface.
+    const handlers = new Map<string, ((...args: never[]) => void)[]>()
     ctx.on = (event: string, handler: (...args: never[]) => void) => {
-      handlers.set(event, handler)
+      handlers.set(event, [...(handlers.get(event) ?? []), handler])
       return () => {}
     }
     const runtime = new OmRuntime(PlainConfig({ observeAfterTokens: 10, storageDir: dir }), { onError: () => {} })
-    const { registerConsolidationTrigger } = await import('../src/hooks/consolidation.ts')
     registerConsolidationTrigger(ctx as never, runtime)
 
     expect(handlers.has('agent/session-start')).toBe(false)
     const created = handlers.get('agent/created')
-    expect(created).toBeDefined()
+    expect(created).toHaveLength(1)
     const session = fakeSession(events)
-    created!({ agent: { session } } as never)
-    // The launch is async; let the claimed in-flight slot settle.
+    // The 0.1.7 serial listener contract: the handler returns undefined.
+    expect(created![0]({ agent: { session } } as never)).toBeUndefined()
+    // The launch is async; let the claimed in-flight slot settle, then wait
+    // for the pipeline to drain so no work floats past the test.
     await vi.waitFor(() => expect(callCount()).toBeGreaterThan(0))
+    await vi.waitFor(() => expect(runtime.consolidationInFlight.size).toBe(0))
   })
 })
