@@ -73,10 +73,13 @@ export function registerConsolidationTrigger(ctx: Context, runtime: OmRuntime): 
   })
   // DSH ≥0.1.6 dispatches agent/created serially and rejects creation on a
   // throwing listener; this one only enqueues a caught async launch, so it
-  // never rejects and never re-enters the emitter.
-  ctx.on('agent/created', ({ agent }) => {
-    if (!isMemorySession(agent.session)) return
+  // never rejects and never re-enters the emitter. The explicit undefined
+  // return satisfies the 0.1.6+ listener signature (undefined | Promise)
+  // while staying assignable to the older void-returning contract.
+  ctx.on('agent/created', ({ agent }): undefined => {
+    if (!isMemorySession(agent.session)) return undefined
     launch(ctx, runtime, agent.session)
+    return undefined
   })
 }
 

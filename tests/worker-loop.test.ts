@@ -33,7 +33,9 @@ describe('runWorkerLoop', () => {
     const second = requests[1].messages as { role: string; content: { type: string; text?: string }[] }[]
     expect(second.at(-2)?.role).toBe('assistant')
     const toolResult = second.at(-1)
-    expect(toolResult?.role).toBe('user')
+    // The tool-result role is host-native: 'user' on 0.1.5 (createToolResultMessage
+    // wraps a user message), first-class 'tool' on 0.1.7 (Session log V4).
+    expect(['user', 'tool']).toContain(toolResult?.role)
     expect(JSON.stringify(toolResult?.content)).toContain('echo: hi')
   })
 
