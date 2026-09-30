@@ -326,3 +326,33 @@ describe('adaptConfigForm (DSH ≥0.1.7 configuration forms)', () => {
     expect(accepted).toEqual(['passive'])
   })
 })
+
+describe('resolveSettingsScope (weak dual-generation binding)', () => {
+  it('prefers configForms when the DSH ≥0.1.7 transport is mounted', async () => {
+    const { resolveSettingsScope } = await import('../src/client/controller.ts')
+    const form = {
+      getSnapshot: () => ({ status: 'ready' as const, value: {}, base: {}, user: {}, revision: 1, writable: true, mode: 'host' as const }),
+      subscribe: () => () => {},
+      set: async () => true,
+      unset: async () => true,
+    }
+    const scope = resolveSettingsScope((name) => name === 'configForms' ? { get: () => form } : undefined, 'observational-memory')
+    expect(scope).toBeDefined()
+    expect(scope!.getSnapshot().revision).toBe(1)
+  })
+
+  it('falls back to the legacy settingsScope bind', async () => {
+    const { resolveSettingsScope } = await import('../src/client/controller.ts')
+    const legacy = fakeScope({})
+    const scope = resolveSettingsScope(
+      (name) => name === 'settingsScope' ? { bind: ({ namespace }: { namespace: string }) => (namespace === 'observational-memory' ? legacy : undefined) } : undefined,
+      'observational-memory',
+    )
+    expect(scope).toBe(legacy)
+  })
+
+  it('returns undefined when neither transport is mounted (no throw)', async () => {
+    const { resolveSettingsScope } = await import('../src/client/controller.ts')
+    expect(resolveSettingsScope(() => undefined, 'observational-memory')).toBeUndefined()
+  })
+})

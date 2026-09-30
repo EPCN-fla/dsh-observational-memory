@@ -46,6 +46,28 @@ export interface ConfigFormsLike {
   get<T>(entryId: string): ConfigFormLike
 }
 
+/** The DSH ≤0.1.5 `settingsScope` client service slice this plugin consumes. */
+export interface SettingsScopeBinderLike {
+  bind(spec: { namespace: string }): SettingsScopeLike
+}
+
+/**
+ * Resolve the settings binding for the host generation, WEAKLY on both
+ * sides: neither service is statically injected (each exists on only one
+ * generation), and a bare `ctx.settingsScope` property access would throw on
+ * the cordis proxy where the service is absent — `get` never throws.
+ * Returns undefined when neither transport is mounted.
+ */
+export function resolveSettingsScope(
+  get: (name: string) => unknown,
+  namespace: string,
+): SettingsScopeLike | undefined {
+  const configForms = get('configForms') as ConfigFormsLike | undefined
+  if (configForms !== undefined) return adaptConfigForm(configForms.get(namespace))
+  const settingsScope = get('settingsScope') as SettingsScopeBinderLike | undefined
+  return settingsScope?.bind({ namespace })
+}
+
 /**
  * Project a DSH ≥0.1.7 configuration form onto the settings-scope contract:
  * the acceptance boolean is dropped (a refused write folds the Host state
