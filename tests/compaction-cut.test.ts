@@ -94,7 +94,8 @@ describe('compaction cut anchoring', () => {
       messages: [
         { id: 'm1', role: 'user', content: [{ type: 'text', text: 'shadowed one' }], source: { kind: 'user' } },
         { id: 'm2', role: 'user', content: [{ type: 'text', text: 'shadowed two' }], source: { kind: 'user' } },
-        { id: 'instr', role: 'user', content: [{ type: 'text', text: 'COMPACTION INSTRUCTION' }], source: { kind: 'plugin', plugin: 'dsh-compaction-basic' } },
+        // 0.1.5 parity: the instruction row carries a fresh unmatched id.
+        { id: 'instr', role: 'user', content: [{ type: 'text', text: 'COMPACTION INSTRUCTION' }] },
       ],
       purpose: 'compaction',
       sessionId: 's1',
@@ -110,6 +111,46 @@ describe('compaction cut anchoring', () => {
     expect(text).toContain('about the shadowed region')
     // The retained tail stays verbatim in context; it must NOT be duplicated
     // into the memory summary.
+    expect(text).not.toContain('about the retained tail')
+  })
+
+  it('skips the id-less instruction row the 0.1.7 summarizer appends', async () => {
+    // DSH 0.1.7's summarizer replays the shadowed durable messages and
+    // appends a fresh id-less, source-less frozen instruction row; the cut
+    // must still anchor at the last replayed durable message, not the tip.
+    const events = [
+      userMessageEvent(0, 'm1', 'shadowed one'),
+      userMessageEvent(1, 'm2', 'shadowed two'),
+      userMessageEvent(2, 'm3', 'retained tail'),
+    ]
+    const { ctx, listeners } = fakeCtx(events)
+    const runtime = new OmRuntime(PlainConfig({ storageDir: dir }), { onError: () => {} })
+    const shadowedObs = makeObservation({ content: 'about the shadowed region', sourceEventSeqs: [1] })
+    const retainedObs = makeObservation({ content: 'about the retained tail', sourceEventSeqs: [2] })
+    await runtime.store.append('s1', { kind: 'observations-recorded', observations: [shadowedObs], coversUpToSeq: 1 })
+    await runtime.store.append('s1', { kind: 'observations-recorded', observations: [retainedObs], coversUpToSeq: 2 })
+    registerCompactionHook(ctx, runtime)
+
+    const options = {
+      provider: 'p',
+      model: 'm',
+      messages: [
+        { id: 'm1', role: 'user', content: [{ type: 'text', text: 'shadowed one' }], source: { kind: 'user' } },
+        { id: 'm2', role: 'user', content: [{ type: 'text', text: 'shadowed two' }], source: { kind: 'user' } },
+        // The 0.1.7 wire shape: no id, no source (deepFreeze({ role, content })).
+        { role: 'user', content: [{ type: 'text', text: 'COMPACTION INSTRUCTION' }] },
+      ],
+      purpose: 'compaction',
+      sessionId: 's1',
+    } as unknown as GenerateOptions
+
+    const waterfall = listeners.get('llm/stream')![0]
+    const chunks = await collect(waterfall(options, () => nativeChunks()) as AsyncIterable<StreamChunk>)
+    const text = chunks
+      .filter((chunk) => chunk.type === 'text-delta')
+      .map((chunk) => (chunk as { text: string }).text)
+      .join('')
+    expect(text).toContain('about the shadowed region')
     expect(text).not.toContain('about the retained tail')
   })
 
