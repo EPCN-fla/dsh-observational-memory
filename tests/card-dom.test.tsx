@@ -288,6 +288,7 @@ describe('ObservationalMemoryRowConfig (DSH ≥0.1.7 Plugins page entry)', () =>
         }),
       )
     })
+    await flush()
     expect(container.textContent).toBe(en['card.description'])
     expect(container.querySelector('button[aria-expanded]')).toBeNull()
   })
@@ -312,6 +313,7 @@ describe('ObservationalMemoryRowConfig (DSH ≥0.1.7 Plugins page entry)', () =>
         }),
       )
     })
+    await flush()
     const header = container.querySelector<HTMLButtonElement>('button[aria-expanded]')
     expect(header).not.toBeNull()
     expect(header!.getAttribute('aria-expanded')).toBe('true')
