@@ -1,9 +1,12 @@
 # CI: PR 运行编译+测试；标签推送运行编译+测试+发布。
 # 普通分支推送不触发（on.push 只匹配 tags）。
 #
-# 发布前置条件（仓库 Secrets）：NPM_TOKEN —— 具备 dsh-observational-memory
-# 发布权限的 npm automation token。版本号由维护者手工升级（本工作流绝不改
-# 版本）；tag 必须等于 v${package.json.version}，否则语义门禁拒绝发布。
+# 发布使用 npm Trusted Publishing（OIDC），无需任何长期 token。前置配置
+# （一次性，在 npmjs.com 完成）：包 dsh-observational-memory → Settings →
+# Trusted Publisher → GitHub Actions：owner = EPCN-fla，repository =
+# dsh-observational-memory，workflow filename = ci.yml（environment 留空）。
+# 版本号由维护者手工升级（本工作流绝不改版本）；tag 必须等于
+# v${package.json.version}，否则语义门禁拒绝发布。
 
 name: ci
 
@@ -57,7 +60,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write # npm --provenance 的 OIDC
+      id-token: write # npm Trusted Publishing 的 OIDC 交换
     steps:
       - uses: actions/checkout@v4
 
@@ -65,9 +68,10 @@ jobs:
         with:
           node-version: 24
           cache: npm
-          registry-url: https://registry.npmjs.org
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # Trusted Publishing 需要 npm CLI ≥ 11.5.1；显式升级避免依赖镜像自带的版本。
+      - name: ensure npm CLI with trusted publishing support
+        run: npm install -g npm@latest
 
       - run: npm ci
 
@@ -100,8 +104,8 @@ jobs:
             echo "stable $PKG_VERSION → dist-tag latest"
           fi
 
-      # npm publish 自动经 prepack 再跑一次 build，保证发布产物与源码同步。
-      - name: publish
-        run: npm publish --provenance --access public --tag "$DIST_TAG"
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      # OIDC 可信发布：CLI 自动用 GitHub 的 OIDC token 换取短期发布凭据，
+      # 并自动生成 provenance 证明（无需 --provenance、无需 NODE_AUTH_TOKEN）。
+      # prepack 会在发布前再跑一次 build，保证发布产物与源码同步。
+      - name: publish (OIDC trusted publishing)
+        run: npm publish --access public --tag "$DIST_TAG"
