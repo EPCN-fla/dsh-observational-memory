@@ -20,7 +20,15 @@ import {
   type ToolSchema,
 } from '@deepseek-ai/dsh-llm'
 
-export const WORKER_PLUGIN_NAME = 'dsh-observational-memory'
+// DSH 0.1.7 removed the shared `plugin` message-source kind: every producer
+// now declares its own kind through module augmentation ("user messages
+// carry any producer's kind"). Declaring it here keeps the same source shape
+// typechecking against either supported cohort's MessageSourceMap.
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap {
+    'observational-memory': { kind: 'observational-memory' }
+  }
+}
 
 /** Thrown when a worker's model stream ends in error/aborted/max-tokens. */
 export class WorkerStreamError extends Error {
@@ -73,7 +81,7 @@ export async function runWorkerLoop(ctx: Context, options: WorkerLoopOptions): P
   const messages: Message[] = [
     createUserMessage({
       content: [{ type: 'text', text: options.userText }],
-      source: { kind: 'plugin', plugin: WORKER_PLUGIN_NAME },
+      source: { kind: 'observational-memory' },
     }),
   ]
   const tools: ToolSchema[] = options.tools.map((tool) => tool.schema)

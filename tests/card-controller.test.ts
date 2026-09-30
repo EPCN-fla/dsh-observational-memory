@@ -287,3 +287,84 @@ describe('parseModelCatalog', () => {
     expect(parseModelCatalog({ groups: 'nope' })).toEqual([])
   })
 })
+
+describe('adaptConfigForm (DSH ≥0.1.7 configuration forms)', () => {
+  it('projects snapshots and drops the write-acceptance boolean', async () => {
+    const { adaptConfigForm } = await import('../src/client/controller.ts')
+    const listeners = new Set<() => void>()
+    let accepted: unknown[] = []
+    const form = {
+      getSnapshot: () => ({
+        status: 'ready' as const,
+        value: { passive: false },
+        base: {},
+        user: {},
+        revision: 7,
+        writable: true,
+        mode: 'host' as const,
+      }),
+      subscribe: (listener: () => void) => {
+        listeners.add(listener)
+        return () => listeners.delete(listener)
+      },
+      set: async (field: string, value: unknown) => {
+        accepted = [field, value]
+        return true
+      },
+      unset: async (field: string) => {
+        accepted = [field]
+        return false
+      },
+    }
+    const scope = adaptConfigForm(form)
+    expect(scope.getSnapshot().revision).toBe(7)
+    expect(scope.getSnapshot().writable).toBe(true)
+    await expect(scope.set('passive', true)).resolves.toBeUndefined()
+    expect(accepted).toEqual(['passive', true])
+    // A refused write still resolves; the Host state folds back via the mirror.
+    await expect(scope.unset('passive')).resolves.toBeUndefined()
+    expect(accepted).toEqual(['passive'])
+  })
+})
+
+describe('resolveSettingsScope (weak dual-generation binding)', () => {
+  it('prefers configForms when the DSH ≥0.1.7 transport is mounted', async () => {
+    const { resolveSettingsScope } = await import('../src/client/controller.ts')
+    const form = {
+      getSnapshot: () => ({ status: 'ready' as const, value: {}, base: {}, user: {}, revision: 1, writable: true, mode: 'host' as const }),
+      subscribe: () => () => {},
+      set: async () => true,
+      unset: async () => true,
+    }
+    const scope = resolveSettingsScope((name) => name === 'configForms' ? { get: () => form } : undefined, 'observational-memory')
+    expect(scope).toBeDefined()
+    expect(scope!.getSnapshot().revision).toBe(1)
+  })
+
+  it('falls back to the legacy settingsScope bind', async () => {
+    const { resolveSettingsScope } = await import('../src/client/controller.ts')
+    const legacy = fakeScope({})
+    const scope = resolveSettingsScope(
+      (name) => name === 'settingsScope' ? { bind: ({ namespace }: { namespace: string }) => (namespace === 'observational-memory' ? legacy : undefined) } : undefined,
+      'observational-memory',
+    )
+    expect(scope).toBe(legacy)
+  })
+
+  it('returns undefined when neither transport is mounted (no throw)', async () => {
+    const { resolveSettingsScope } = await import('../src/client/controller.ts')
+    expect(resolveSettingsScope(() => undefined, 'observational-memory')).toBeUndefined()
+  })
+})
+
+describe('OmCardController disposal', () => {
+  it('dispose() releases the scope subscription', async () => {
+    const { OmCardController } = await import('../src/client/controller.ts')
+    const scope = fakeScope({})
+    const controller = new OmCardController(scope, CARD_FIELDS)
+    controller.dispose()
+    // A second dispose is safe, and no error surfaces from a post-dispose write.
+    controller.dispose()
+    await expect(scope.set('passive', true)).resolves.toBeUndefined()
+  })
+})

@@ -42,7 +42,7 @@ flowchart TD
     Hook -->|记忆为空| Native[回退 DSH 原生摘要]
 ```
 
-1. 会话正常推进；`turn/end` 与 `agent/session-start` 事件驱动整合流水线（观察器优先，随后反思器，最后清理器）。
+1. 会话正常推进；`turn/end` 与 `agent/created` 事件驱动整合流水线（观察器优先，随后反思器，最后清理器）。
 2. 每个 worker 只有一个记录工具，由代码校验模型产出（来源 seq、支撑 id 必须真实存在），id 由内容哈希确定性生成。
 3. DSH 压缩引擎做摘要调用时（`purpose: 'compaction'`），本插件在 `llm/stream` 瀑布中拦截：投影非空则直接返回渲染好的记忆文本，压缩零等待；投影为空则放行原生摘要。
 4. 压缩提交后，可见记忆（visible memory）记入账本，供状态对比（drift）使用。
@@ -57,17 +57,17 @@ flowchart TD
 
 ## 安装
 
-要求：deepseek-harness **0.1.5-rc.2**（`@deepseek-ai/dsh-*` 包 ≥ 0.1.5-rc.2）。
+要求：deepseek-harness **0.1.5 预发布线 ≥ rc.2，或 0.1.7-rc.1**（`@deepseek-ai/dsh-*` peer 区间为 `>=0.1.5-rc.2 <0.1.5 || 0.1.7-rc.1`；插件在 0.1.7 上使用 Profile 持有的实时配置，在 0.1.5 上回退到经典 settings.yaml 设置节，旧设置文档在 0.1.7 首次启动时自动导入）。
 
 通过 DSH CLI 把插件加入指定的 Profile（这里以 `web` 为例，按需替换）。本包自带 `cordis.patch.yml`，组合器会自动挂载 host 半端，并向 Web 客户端提供 `/plugins/dsh-observational-memory/client.js`——安装后无需额外的组合配置。
 
-### From npm
+### 从 npm 安装
 
 ```sh
 dsh plugin --profile web add dsh-observational-memory
 ```
 
-### From GitHub
+### 从 GitHub 安装
 
 ```sh
 dsh plugin --profile web add github:EPCN-fla/dsh-observational-memory
@@ -75,7 +75,7 @@ dsh plugin --profile web add github:EPCN-fla/dsh-observational-memory
 
 通过 git 源安装时，npm 会执行包的 `prepare` 脚本自动完成构建（要求 Node `^22.19.0` 或 `>=24`）。
 
-### From tarball
+### 从 tarball 安装
 
 ```sh
 git clone https://github.com/EPCN-fla/dsh-observational-memory.git
@@ -86,7 +86,7 @@ npm pack        # 产出 dsh-observational-memory-<version>.tgz
 dsh plugin --profile web add ./dsh-observational-memory-<version>.tgz
 ```
 
-### Local development
+### 本地开发
 
 开发期也可以把 CLI 直接指向工作副本目录；每次改动后重新 `npm run build` 即可生效：
 

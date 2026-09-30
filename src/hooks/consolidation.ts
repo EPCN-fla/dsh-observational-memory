@@ -1,8 +1,12 @@
 /**
  * Consolidation trigger: runs the observer → reflector → dropper pipeline in
  * the background when a session's raw-token clocks are due. Triggered by the
- * persisted `turn/end` session event and by `agent/session-start` (a resumed
- * session may already carry an unobserved backlog).
+ * persisted `turn/end` session event and by `agent/created` (a freshly
+ * started or resumed session may already carry an unobserved backlog).
+ * `agent/created` replaces the `agent/session-start` event removed in DSH
+ * 0.1.6: it exists on both host generations, fires once per agent
+ * registration (startup and resume alike), and reading only its `agent`
+ * field keeps the payload shape compatible with either.
  *
  * {@link runConsolidationNow} is the manual entry behind the Memory tab's
  * "run now" action: passive mode's proactive surface, bypassing the passive
@@ -67,9 +71,15 @@ export function registerConsolidationTrigger(ctx: Context, runtime: OmRuntime): 
     if (!isMemorySession(session)) return
     launch(ctx, runtime, session)
   })
-  ctx.on('agent/session-start', ({ agent }) => {
-    if (!isMemorySession(agent.session)) return
+  // DSH ≥0.1.6 dispatches agent/created serially and rejects creation on a
+  // throwing listener; this one only enqueues a caught async launch, so it
+  // never rejects and never re-enters the emitter. The explicit undefined
+  // return satisfies the 0.1.6+ listener signature (undefined | Promise)
+  // while staying assignable to the older void-returning contract.
+  ctx.on('agent/created', ({ agent }): undefined => {
+    if (!isMemorySession(agent.session)) return undefined
     launch(ctx, runtime, agent.session)
+    return undefined
   })
 }
 
@@ -82,6 +92,8 @@ function launch(ctx: Context, runtime: OmRuntime, session: Session): void {
 
 /** Exported for tests; the triggers above are the production callers. */
 export async function maybeLaunchConsolidation(ctx: Context, runtime: OmRuntime, session: Session): Promise<void> {
+  // Pick up live (DSH ≥0.1.7 volatile) profile edits; a no-op when unchanged.
+  runtime.refreshConfig()
   // Inheriting a fork parent's ledger is not a proactive trigger: passive
   // mode keeps it, so a rolled-back branch holds on to the memory it shares
   // with its source even with every background worker disabled.
@@ -91,7 +103,7 @@ export async function maybeLaunchConsolidation(ctx: Context, runtime: OmRuntime,
   const sessionId: string = session.id
   if (runtime.consolidationInFlight.has(sessionId)) return
   // Claim the slot synchronously — before the first await — so concurrent
-  // turn/end and session-start triggers cannot double-run the pipeline.
+  // turn/end and agent/created triggers cannot double-run the pipeline.
   runtime.consolidationInFlight.add(sessionId)
   try {
     const entries = await runtime.store.load(sessionId)
@@ -117,6 +129,7 @@ export async function maybeLaunchConsolidation(ctx: Context, runtime: OmRuntime,
  * run is already active for the session.
  */
 export async function runConsolidationNow(ctx: Context, runtime: OmRuntime, session: Session): Promise<boolean> {
+  runtime.refreshConfig()
   if (session.header.origin === 'subagent') return false
   const sessionId: string = session.id
   if (runtime.consolidationInFlight.has(sessionId)) return false

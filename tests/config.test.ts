@@ -1,15 +1,25 @@
 import { describe, expect, it } from 'vitest'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, beforeEach } from 'vitest'
 import {
   resolveCompactAfterTokens,
   resolveConfig,
   resolveObservationsPoolTargetTokens,
   resolveObserverChunkMaxTokens,
+  unwrapVolatileConfig,
   Config,
+  PlainConfig,
 } from '../src/config.ts'
+
+let dir: string
+beforeEach(async () => { dir = await mkdtemp(join(tmpdir(), 'om-config-')) })
+afterEach(async () => { await rm(dir, { recursive: true, force: true }) })
 
 describe('Config schema', () => {
   it('resolves defaults for an empty composition entry', () => {
-    const config = Config({})
+    const config = PlainConfig({})
     expect(config.observeAfterTokens).toBe(10_000)
     expect(config.reflectAfterTokens).toBe(20_000)
     expect(config.compactAfterTokens).toBe(0)
@@ -23,7 +33,7 @@ describe('Config schema', () => {
   })
 
   it('keeps user values', () => {
-    const config = Config({ observeAfterTokens: 5000, passive: true, model: { provider: 'p', id: 'm' } })
+    const config = PlainConfig({ observeAfterTokens: 5000, passive: true, model: { provider: 'p', id: 'm' } })
     expect(config.observeAfterTokens).toBe(5000)
     expect(config.passive).toBe(true)
     expect(config.model).toEqual({ provider: 'p', id: 'm' })
@@ -91,12 +101,12 @@ describe('resolveCompactAfterTokens', () => {
   })
 
   it('rejects out-of-range ratios at the schema boundary', () => {
-    expect(() => Config({ compactAfterTokensRatio: -0.1 })).toThrow()
-    expect(() => Config({ compactAfterTokensRatio: 1.5 })).toThrow()
+    expect(() => PlainConfig({ compactAfterTokensRatio: -0.1 })).toThrow()
+    expect(() => PlainConfig({ compactAfterTokensRatio: 1.5 })).toThrow()
   })
 
   it('rejects an unknown mode at the schema boundary', () => {
-    expect(() => Config({ compactAfterTokensMode: 'windowed' as never })).toThrow()
+    expect(() => PlainConfig({ compactAfterTokensMode: 'windowed' as never })).toThrow()
   })
 })
 
@@ -113,5 +123,102 @@ describe('resolveObservationsPoolTargetTokens', () => {
     expect(
       resolveObservationsPoolTargetTokens(resolveConfig({ observationsPoolMaxTokens: 3000, observationsPoolTargetTokens: 9000 })),
     ).toBe(1500)
+  })
+})
+
+describe('live (volatile) configuration', () => {
+  it('wraps every resolved field in a live reference for the DSH ≥0.1.7 settings transport', () => {
+    // Behavioral assertion (no schemastery internals): calling the entry
+    // schema yields Volatile refs for the volatile-marked fields, while the
+    // plain face yields plain values.
+    const wrapped = Config({ observeAfterTokens: 5000, storageDir: '/tmp/om' }) as Record<string, unknown>
+    expect(Object.keys(wrapped).length).toBeGreaterThan(0)
+    for (const [key, value] of Object.entries(wrapped)) {
+      expect(typeof (value as { get?: unknown })?.get, `field ${key}`).toBe('function')
+    }
+    expect((wrapped.observeAfterTokens as { get(): number }).get()).toBe(5000)
+    const plain = PlainConfig({ observeAfterTokens: 5000, storageDir: '/tmp/om' }) as Record<string, unknown>
+    for (const value of Object.values(plain)) {
+      expect(typeof (value as { get?: unknown })?.get).not.toBe('function')
+    }
+  })
+
+  it('parses plain values unchanged (legacy host shape)', () => {
+    const config = resolveConfig({ observeAfterTokens: 5000, passive: true })
+    expect(config.observeAfterTokens).toBe(5000)
+    expect(config.passive).toBe(true)
+  })
+
+  it('unwraps volatile refs before schema parsing (DSH ≥0.1.7 shape)', () => {
+    const ref = <T,>(value: T) => ({ get: () => value })
+    const config = resolveConfig({
+      observeAfterTokens: ref(5000),
+      passive: ref(true),
+      model: ref({ provider: 'p', id: 'm' }),
+    } as never)
+    expect(config.observeAfterTokens).toBe(5000)
+    expect(config.passive).toBe(true)
+    expect(config.model).toEqual({ provider: 'p', id: 'm' })
+  })
+
+  it('unwrapVolatileConfig reads the ref live at every call', () => {
+    let current = 10_000
+    const live = { observeAfterTokens: { get: () => current } } as never
+    expect(unwrapVolatileConfig(live).observeAfterTokens).toBe(10_000)
+    current = 5000
+    expect(unwrapVolatileConfig(live).observeAfterTokens).toBe(5000)
+  })
+})
+
+describe('OmRuntime config epochs', () => {
+  it('setConfig with an unchanged value is a no-op (no epoch reset)', async () => {
+    const { OmRuntime } = await import('../src/runtime.ts')
+    const runtime = new OmRuntime(resolveConfig({ storageDir: dir }), { onError: () => {} })
+    runtime.workerConsecutiveFailures.set('s1', 3)
+    runtime.setConfig({ storageDir: dir })
+    expect(runtime.workerConsecutiveFailures.get('s1')).toBe(3)
+  })
+
+  it('setConfig with a changed value applies it and resets the epoch', async () => {
+    const { OmRuntime } = await import('../src/runtime.ts')
+    const runtime = new OmRuntime(resolveConfig({ storageDir: dir }), { onError: () => {} })
+    runtime.workerConsecutiveFailures.set('s1', 3)
+    runtime.setConfig({ storageDir: dir, observeAfterTokens: 5000 })
+    expect(runtime.config.observeAfterTokens).toBe(5000)
+    expect(runtime.workerConsecutiveFailures.get('s1')).toBeUndefined()
+  })
+
+  it('refreshConfig polls the bound live source and applies drift', async () => {
+    const { OmRuntime } = await import('../src/runtime.ts')
+    let current = 10_000
+    const runtime = new OmRuntime(resolveConfig({ storageDir: dir }), { onError: () => {} })
+    runtime.bindConfigSource(() => ({ storageDir: dir, observeAfterTokens: current }))
+    runtime.refreshConfig()
+    expect(runtime.config.observeAfterTokens).toBe(10_000)
+    current = 5000
+    runtime.refreshConfig()
+    expect(runtime.config.observeAfterTokens).toBe(5000)
+  })
+})
+
+describe('refreshConfig fault tolerance', () => {
+  it('rejects an invalid live edit without throwing and keeps the last good epoch', async () => {
+    const { OmRuntime } = await import('../src/runtime.ts')
+    const errors: string[] = []
+    let current: unknown = 10_000
+    const runtime = new OmRuntime(resolveConfig({ storageDir: dir }), { onError: (m) => errors.push(m) })
+    runtime.bindConfigSource(() => ({ storageDir: dir, observeAfterTokens: current } as never))
+    runtime.refreshConfig()
+    expect(runtime.config.observeAfterTokens).toBe(10_000)
+    // Below the schema minimum: the poll must not throw into the host path.
+    current = 0
+    expect(() => runtime.refreshConfig()).not.toThrow()
+    expect(runtime.config.observeAfterTokens).toBe(10_000)
+    expect(errors).toHaveLength(1)
+    expect(errors[0]).toContain('rejected an invalid live config edit')
+    // A later valid edit applies normally.
+    current = 5000
+    runtime.refreshConfig()
+    expect(runtime.config.observeAfterTokens).toBe(5000)
   })
 })

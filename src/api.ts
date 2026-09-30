@@ -121,6 +121,7 @@ export class OmApiService extends TypertRemoteService {
   async status(request: OmSessionRequest, signal?: AbortSignal): Promise<OmTextValue> {
     const sessionId = sessionIdOf(request)
     const session = attachedSession(this.ctx, sessionId)
+    this.runtime.refreshConfig()
     await this.runtime.ensureInherited(this.ctx, session)
     const agent = this.ctx.agents.get(sessionId)
     const config = this.runtime.config
@@ -156,6 +157,9 @@ export class OmApiService extends TypertRemoteService {
   @Remote('view')
   async view(request: OmViewRequest, signal?: AbortSignal): Promise<OmTextValue> {
     const sessionId = sessionIdOf(request)
+    // The store is rooted at the configured storageDir: pick up a live
+    // (DSH ≥0.1.7 volatile) profile edit before touching it.
+    this.runtime.refreshConfig()
     if (request.mode !== undefined && request.mode !== 'visible' && request.mode !== 'full') {
       throw new RemoteError('gateway/bad-request', `mode must be "visible" or "full"; received ${JSON.stringify(request.mode)}`, {})
     }
@@ -177,6 +181,7 @@ export class OmApiService extends TypertRemoteService {
   async run(request: OmSessionRequest, signal?: AbortSignal): Promise<OmRunValue> {
     const sessionId = sessionIdOf(request)
     const session = attachedSession(this.ctx, sessionId)
+    // runConsolidationNow refreshes the live configuration itself at the top.
     const ran = await runConsolidationNow(this.ctx, this.runtime, session)
     return { ran }
   }
@@ -185,6 +190,7 @@ export class OmApiService extends TypertRemoteService {
   @Remote('logs')
   async logs(request: OmLogsRequest, signal?: AbortSignal): Promise<OmLogsValue> {
     const sessionId = sessionIdOf(request)
+    this.runtime.refreshConfig()
     const config = this.runtime.config
     if (!config.debugLog) return { enabled: false, text: '' }
     const bound = typeof request.maxLines === 'number' && Number.isInteger(request.maxLines) && request.maxLines > 0

@@ -8,8 +8,8 @@
  */
 import type { Context } from '@deepseek-ai/cordis'
 import type { ReactNode } from 'react'
-import { ObservationalMemoryCard } from './card.tsx'
-import { CARD_FIELDS, OmCardController, type SettingsScopeLike } from './controller.ts'
+import { ObservationalMemoryCard, ObservationalMemoryRowConfig } from './card.tsx'
+import { CARD_FIELDS, OmCardController, resolveSettingsScope } from './controller.ts'
 import { en, LOCALE_NAMESPACE, zh } from './locales.ts'
 import { MemoryView } from './memory.tsx'
 import { OmMemoryController, type ConnectionRpcLike, type MemoryViewMode } from './memory.ts'
@@ -17,7 +17,10 @@ import type { RollbackEventView } from './rollback.ts'
 import { OmUserMessageNodeView, type RollbackInjected } from './user-message.tsx'
 
 export const name = 'dsh-observational-memory-ui'
-export const inject = ['slots', 'locale', 'settingsScope', 'connection', 'sessions', 'conversation']
+// No settingsScope/configForms in the static inject list: each exists on only
+// one host generation, and a missing static inject never activates. The
+// settings binding resolves dynamically in apply instead.
+export const inject = ['slots', 'locale', 'connection', 'sessions', 'conversation']
 
 /** The settings namespace joining the host half and this card. */
 const NS = LOCALE_NAMESPACE
@@ -42,10 +45,6 @@ interface SlotsService {
     },
     component: (props: never) => ReactNode,
   ): () => void
-}
-
-interface SettingsScopeBinder {
-  bind(spec: { namespace: string }): SettingsScopeLike
 }
 
 interface ConnectionService {
@@ -77,7 +76,6 @@ declare module '@deepseek-ai/cordis' {
   interface Context {
     locale: LocaleService
     slots: SlotsService
-    settingsScope: SettingsScopeBinder
     connection: ConnectionService
     conversation: ConversationService
   }
@@ -103,20 +101,55 @@ export function apply(ctx: Context): void {
 
   // The settings card edits the namespace and lists the Host model catalog
   // (session/modelCatalog over the Connection RPC channel) in its provider →
-  // model → reasoning-effort dropdowns.
-  const controller = new OmCardController(ctx.settingsScope.bind({ namespace: NS }), CARD_FIELDS, ctx.connection.rpc)
+  // model → reasoning-effort dropdowns. The namespace binding follows the
+  // host generation: DSH ≥0.1.7 serves the entry's live configuration form
+  // (values persist into the profile's cordis.patch.yml); DSH ≤0.1.5 binds
+  // the legacy settings scope (the settings.yaml document).
+  const scope = resolveSettingsScope((name) => ctx.get(name), NS)
+  const controller = scope === undefined
+    ? undefined
+    : new OmCardController(scope, CARD_FIELDS, ctx.connection.rpc)
+  if (controller === undefined) {
+    // Neither generation's settings transport is mounted (an exotic
+    // composition): the card seats stay unregistered rather than taking
+    // the whole browser half down.
+    console.warn('[observational-memory] no settings transport (configForms/settingsScope); the configuration card is unavailable')
+  }
 
-  ctx.slots.inject('settings.plugin.item', () =>
-    ctx.slots.register(
-      {
-        name: 'settings.plugin.item',
-        key: NS,
-        locale: NS,
-        inject: () => controller.inject() as unknown as Record<string, unknown>,
-      },
-      ObservationalMemoryCard as never,
-    ),
-  )
+  if (controller !== undefined) {
+    const cardController = controller
+    // Unload/HMR: release the subscription into the (provider-shared on
+    // DSH ≥0.1.7) configuration form so dead controllers stop republishing.
+    ctx.effect(() => () => cardController.dispose(), 'observational-memory: settings card')
+    ctx.slots.inject('settings.plugin.item', () =>
+      ctx.slots.register(
+        {
+          name: 'settings.plugin.item',
+          key: NS,
+          locale: NS,
+          inject: () => cardController.inject() as unknown as Record<string, unknown>,
+        },
+        ObservationalMemoryCard as never,
+      ),
+    )
+
+    // DSH ≥0.1.7 — the Plugins page's row-configuration slot, keyed
+    // `<package name>#<row id>` (the row id this package's cordis.patch.yml
+    // declares). The retired settings.plugin.item above is never declared on
+    // that host, this one is never declared on 0.1.5 — ctx.slots.inject waits
+    // for the declaration harmlessly in both directions.
+    ctx.slots.inject('plugins.row.config', () =>
+      ctx.slots.register(
+        {
+          name: 'plugins.row.config',
+          key: 'dsh-observational-memory#observational-memory',
+          locale: NS,
+          inject: () => cardController.inject() as unknown as Record<string, unknown>,
+        },
+        ObservationalMemoryRowConfig as never,
+      ),
+    )
+  }
 
   // Rollback-enabled user message renderers. `conversation.chat.node` has no
   // additive seam for user-message actions, so the keyed `user`/`steering`

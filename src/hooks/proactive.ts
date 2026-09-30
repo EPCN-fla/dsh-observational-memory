@@ -53,6 +53,8 @@ export function registerCompactionTrigger(ctx: Context, runtime: OmRuntime): voi
   })
 
   ctx.on('agent/status', ({ agent, status }) => {
+    // Pick up live (DSH ≥0.1.7 volatile) profile edits; a no-op when unchanged.
+    runtime.refreshConfig()
     const config = runtime.config
     runtime.debug(agent.session.id, 'compaction.status', {
       status,

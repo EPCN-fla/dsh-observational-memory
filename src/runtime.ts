@@ -89,10 +89,16 @@ export class OmRuntime {
     return this._store
   }
 
-  /** Swap in a new effective config, re-rooting the store when it moved. */
+  /**
+   * Swap in a new effective config, re-rooting the store when it moved.
+   * An unchanged value is a no-op: trigger points poll this on every event
+   * (the DSH ≥0.1.7 live-config model has no change callback), and the
+   * epoch reset below must only run when something actually changed.
+   */
   setConfig(config: Config): void {
     const previousRoot = storageRoot(this._config)
     const next = resolveConfig(config)
+    if (JSON.stringify(next) === JSON.stringify(this._config)) return
     const nextRoot = storageRoot(next)
     this._config = next
     // A config change re-arms the worker-model override: failure streaks and
@@ -103,6 +109,35 @@ export class OmRuntime {
       this._store = new LedgerStore(nextRoot, { onError: this.onError })
     }
   }
+
+  /**
+   * Re-read the bound live-config source, applying any drift through
+   * {@link setConfig}. On DSH ≥0.1.7 the source's volatile refs track profile
+   * edits in place (the loader's volatile-update signal is internal to the
+   * owning fiber, so trigger entry points poll here before reading `config`);
+   * on older hosts the legacy settings section's onChange still delivers
+   * immediate updates and the poll is a no-op.
+   *
+   * A source value that fails schema validation is rejected WITHOUT throwing:
+   * polls run inside host paths that must not break (compaction's llm/stream
+   * waterfall, agent/status dispatch), so the last good epoch stays effective
+   * and the rejection is only logged.
+   */
+  refreshConfig(): void {
+    if (this.configSource === undefined) return
+    try {
+      this.setConfig(this.configSource())
+    } catch (error) {
+      this.onError(`[observational-memory] rejected an invalid live config edit; keeping the previous values: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
+  /** Bind the live-config source {@link refreshConfig} polls. */
+  bindConfigSource(source: () => Config): void {
+    this.configSource = source
+  }
+
+  private configSource: (() => Config) | undefined
 
   /**
    * Record one worker-stage failure and bump the consecutive-failure streak.

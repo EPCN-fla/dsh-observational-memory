@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Context } from '@deepseek-ai/cordis'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 import type { Session } from '@deepseek-ai/dsh-session'
-import { Config } from '../src/config.ts'
+import { PlainConfig } from '../src/config.ts'
 import { registerCompactionHook } from '../src/hooks/compaction.ts'
 import { OmRuntime } from '../src/runtime.ts'
 import { makeObservation, makeReflection } from './fixtures.ts'
@@ -74,7 +74,7 @@ describe('compaction cut anchoring', () => {
       userMessageEvent(3, 'm4', 'retained four'),
     ]
     const { ctx, listeners } = fakeCtx(events)
-    const runtime = new OmRuntime(Config({ storageDir: dir }), { onError: () => {} })
+    const runtime = new OmRuntime(PlainConfig({ storageDir: dir }), { onError: () => {} })
 
     const shadowedObs = makeObservation({ content: 'about the shadowed region', sourceEventSeqs: [1] })
     const retainedObs = makeObservation({ content: 'about the retained tail', sourceEventSeqs: [3] })
@@ -94,7 +94,8 @@ describe('compaction cut anchoring', () => {
       messages: [
         { id: 'm1', role: 'user', content: [{ type: 'text', text: 'shadowed one' }], source: { kind: 'user' } },
         { id: 'm2', role: 'user', content: [{ type: 'text', text: 'shadowed two' }], source: { kind: 'user' } },
-        { id: 'instr', role: 'user', content: [{ type: 'text', text: 'COMPACTION INSTRUCTION' }], source: { kind: 'plugin', plugin: 'dsh-compaction-basic' } },
+        // 0.1.5 parity: the instruction row carries a fresh unmatched id.
+        { id: 'instr', role: 'user', content: [{ type: 'text', text: 'COMPACTION INSTRUCTION' }] },
       ],
       purpose: 'compaction',
       sessionId: 's1',
@@ -113,10 +114,50 @@ describe('compaction cut anchoring', () => {
     expect(text).not.toContain('about the retained tail')
   })
 
+  it('skips the id-less instruction row the 0.1.7 summarizer appends', async () => {
+    // DSH 0.1.7's summarizer replays the shadowed durable messages and
+    // appends a fresh id-less, source-less frozen instruction row; the cut
+    // must still anchor at the last replayed durable message, not the tip.
+    const events = [
+      userMessageEvent(0, 'm1', 'shadowed one'),
+      userMessageEvent(1, 'm2', 'shadowed two'),
+      userMessageEvent(2, 'm3', 'retained tail'),
+    ]
+    const { ctx, listeners } = fakeCtx(events)
+    const runtime = new OmRuntime(PlainConfig({ storageDir: dir }), { onError: () => {} })
+    const shadowedObs = makeObservation({ content: 'about the shadowed region', sourceEventSeqs: [1] })
+    const retainedObs = makeObservation({ content: 'about the retained tail', sourceEventSeqs: [2] })
+    await runtime.store.append('s1', { kind: 'observations-recorded', observations: [shadowedObs], coversUpToSeq: 1 })
+    await runtime.store.append('s1', { kind: 'observations-recorded', observations: [retainedObs], coversUpToSeq: 2 })
+    registerCompactionHook(ctx, runtime)
+
+    const options = {
+      provider: 'p',
+      model: 'm',
+      messages: [
+        { id: 'm1', role: 'user', content: [{ type: 'text', text: 'shadowed one' }], source: { kind: 'user' } },
+        { id: 'm2', role: 'user', content: [{ type: 'text', text: 'shadowed two' }], source: { kind: 'user' } },
+        // The 0.1.7 wire shape: no id, no source (deepFreeze({ role, content })).
+        { role: 'user', content: [{ type: 'text', text: 'COMPACTION INSTRUCTION' }] },
+      ],
+      purpose: 'compaction',
+      sessionId: 's1',
+    } as unknown as GenerateOptions
+
+    const waterfall = listeners.get('llm/stream')![0]
+    const chunks = await collect(waterfall(options, () => nativeChunks()) as AsyncIterable<StreamChunk>)
+    const text = chunks
+      .filter((chunk) => chunk.type === 'text-delta')
+      .map((chunk) => (chunk as { text: string }).text)
+      .join('')
+    expect(text).toContain('about the shadowed region')
+    expect(text).not.toContain('about the retained tail')
+  })
+
   it('falls back to the log tip when no request message matches', async () => {
     const events = [userMessageEvent(0, 'm1', 'one')]
     const { ctx, listeners } = fakeCtx(events)
-    const runtime = new OmRuntime(Config({ storageDir: dir }), { onError: () => {} })
+    const runtime = new OmRuntime(PlainConfig({ storageDir: dir }), { onError: () => {} })
     const observation = makeObservation({ content: 'tip observation', sourceEventSeqs: [0] })
     await runtime.store.append('s1', { kind: 'observations-recorded', observations: [observation], coversUpToSeq: 0 })
     registerCompactionHook(ctx, runtime)
@@ -140,7 +181,7 @@ describe('compaction cut anchoring', () => {
   it('records visible memory with reflection support ids intact', async () => {
     const events = [userMessageEvent(0, 'm1', 'one')]
     const { ctx, listeners } = fakeCtx(events)
-    const runtime = new OmRuntime(Config({ storageDir: dir, observationsPoolMaxTokens: 1 }), { onError: () => {} })
+    const runtime = new OmRuntime(PlainConfig({ storageDir: dir, observationsPoolMaxTokens: 1 }), { onError: () => {} })
     const observation = makeObservation({ content: 'evidence', sourceEventSeqs: [0] })
     const reflection = makeReflection('durable fact', [observation.id])
     await runtime.store.append('s1', { kind: 'observations-recorded', observations: [observation], coversUpToSeq: 0 })

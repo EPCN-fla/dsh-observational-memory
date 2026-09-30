@@ -28,6 +28,60 @@ export interface SettingsScopeLike {
   unset(field: string): Promise<void>
 }
 
+/**
+ * The DSH ≥0.1.7 configuration-form face (`ctx.configForms.get(entryId)`),
+ * declared locally because the client type surface is not shared across host
+ * generations. Snapshot fields are a structural superset of the legacy
+ * settings scope's; writes resolve whether the Host accepted them.
+ */
+export interface ConfigFormLike {
+  getSnapshot(): ReturnType<SettingsScopeLike['getSnapshot']> & { mode: 'host' | 'memory' }
+  subscribe(listener: () => void): () => void
+  set(field: string, value: unknown): Promise<boolean>
+  unset(field: string): Promise<boolean>
+}
+
+/** The DSH ≥0.1.7 `configForms` client service slice this plugin consumes. */
+export interface ConfigFormsLike {
+  get<T>(entryId: string): ConfigFormLike
+}
+
+/** The DSH ≤0.1.5 `settingsScope` client service slice this plugin consumes. */
+export interface SettingsScopeBinderLike {
+  bind(spec: { namespace: string }): SettingsScopeLike
+}
+
+/**
+ * Resolve the settings binding for the host generation, WEAKLY on both
+ * sides: neither service is statically injected (each exists on only one
+ * generation), and a bare `ctx.settingsScope` property access would throw on
+ * the cordis proxy where the service is absent — `get` never throws.
+ * Returns undefined when neither transport is mounted.
+ */
+export function resolveSettingsScope(
+  get: (name: string) => unknown,
+  namespace: string,
+): SettingsScopeLike | undefined {
+  const configForms = get('configForms') as ConfigFormsLike | undefined
+  if (configForms !== undefined) return adaptConfigForm(configForms.get(namespace))
+  const settingsScope = get('settingsScope') as SettingsScopeBinderLike | undefined
+  return settingsScope?.bind({ namespace })
+}
+
+/**
+ * Project a DSH ≥0.1.7 configuration form onto the settings-scope contract:
+ * the acceptance boolean is dropped (a refused write folds the Host state
+ * back into the mirror, which the snapshot subscription surfaces).
+ */
+export function adaptConfigForm(form: ConfigFormLike): SettingsScopeLike {
+  return {
+    getSnapshot: () => form.getSnapshot(),
+    subscribe: (listener) => form.subscribe(listener),
+    set: (field, value) => form.set(field, value).then(() => {}),
+    unset: (field) => form.unset(field).then(() => {}),
+  }
+}
+
 /** Minimal snapshot store the slot renderer binds as a selector hook. */
 export interface SnapshotStoreLike<T> {
   getSnapshot(): T
@@ -243,7 +297,6 @@ function hasPath(source: unknown, key: string): boolean {
 export class OmCardController {
   private readonly specs = new Map<string, FieldDef>()
   private readonly staged = new Map<string, StagedEdit>()
-  private readonly listeners = new Set<() => void>()
   private saving = false
   private failed = false
   private catalogStatus: OmCardState['catalogStatus'] = 'idle'
@@ -251,6 +304,7 @@ export class OmCardController {
   /** Bumps on every issued catalog request so a late response never wins. */
   private catalogGeneration = 0
   private readonly store: SnapshotStoreLike<OmCardState>
+  private readonly unsubscribeScope: () => void
 
   constructor(
     private readonly scope: SettingsScopeLike,
@@ -259,10 +313,19 @@ export class OmCardController {
   ) {
     for (const field of fields) this.specs.set(field.key, field)
     this.store = createStore(this.projection())
-    scope.subscribe(() => this.publish())
+    this.unsubscribeScope = scope.subscribe(() => this.publish())
     // The model dropdowns need the Host catalog; fetch it once up front so
     // expanding the card never waits on the wire.
     if (rpc !== undefined) void this.loadCatalog()
+  }
+
+  /**
+   * Release the scope subscription. On DSH ≥0.1.7 the underlying form is
+   * provider-owned and shared, so an undisposed controller leaks a listener
+   * into it on every unload/HMR; the plugin's ctx.effect calls this.
+   */
+  dispose(): void {
+    this.unsubscribeScope()
   }
 
   inject(): OmCardFace {
@@ -413,9 +476,7 @@ export class OmCardController {
   }
 
   private publish(): void {
-    const next = this.projection()
-    this.store.set(next)
-    for (const listener of this.listeners) listener()
+    this.store.set(this.projection())
   }
 
   /** Resolve the model object a save would write, or 'clear', or undefined when invalid. */

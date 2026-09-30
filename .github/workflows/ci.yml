@@ -1,0 +1,111 @@
+# CI: PR 运行编译+测试；标签推送运行编译+测试+发布。
+# 普通分支推送不触发（on.push 只匹配 tags）。
+#
+# 发布使用 npm Trusted Publishing（OIDC），无需任何长期 token。前置配置
+# （一次性，在 npmjs.com 完成）：包 dsh-observational-memory → Settings →
+# Trusted Publisher → GitHub Actions：owner = EPCN-fla，repository =
+# dsh-observational-memory，workflow filename = ci.yml（environment 留空）。
+# 版本号由维护者手工升级（本工作流绝不改版本）；tag 必须等于
+# v${package.json.version}，否则语义门禁拒绝发布。
+
+name: ci
+
+on:
+  pull_request:
+  push:
+    tags:
+      - 'v*'
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # 编译 + 测试：PR 与标签推送都运行。
+  verify:
+    name: build + test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      # npm ci 严格按 package-lock.json 安装（含 esbuild 的 postinstall）。
+      - run: npm ci
+
+      - name: typecheck
+        run: npm run typecheck
+
+      - name: test
+        run: npm test
+
+      - name: build
+        run: npm run build
+
+      # 打包自检（prepack 会再跑一次 build）：确认 files 覆盖运行时产物，
+      # 不实际发布任何内容。
+      - name: pack dry-run
+        run: npm pack --dry-run
+
+  # 发布：仅标签推送；语义门禁全过后才 npm publish。
+  publish:
+    name: npm publish
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # npm Trusted Publishing 的 OIDC 交换
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      # Trusted Publishing 需要 npm CLI ≥ 11.5.1；显式升级避免依赖镜像自带的版本。
+      - name: ensure npm CLI with trusted publishing support
+        run: npm install -g npm@latest
+
+      - run: npm ci
+
+      # 语义门禁 1：tag 必须等于 v${package.json.version}。
+      - name: gate — tag matches package.json version
+        run: |
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          if [ "${{ github.ref_name }}" != "v$PKG_VERSION" ]; then
+            echo "::error::tag ${{ github.ref_name }} != v$PKG_VERSION (package.json). 先手工升级版本号再打标签。"
+            exit 1
+          fi
+
+      # 语义门禁 2：预发布版本只能去非 latest 的 dist-tag（本项目声明为
+      # next）；稳定版本发布前拒绝让 latest 回退到更低版本。
+      - name: gate — dist-tag and latest-floor
+        run: |
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          if [[ "$PKG_VERSION" == *-* ]]; then
+            echo "DIST_TAG=next" >> "$GITHUB_ENV"
+            echo "prerelease $PKG_VERSION → dist-tag next"
+          else
+            echo "DIST_TAG=latest" >> "$GITHUB_ENV"
+            LATEST=$(npm view dsh-observational-memory dist-tags.latest 2>/dev/null || true)
+            if [ -n "$LATEST" ]; then
+              npx --yes semver@7 "$PKG_VERSION" -r ">$LATEST" > /dev/null || {
+                echo "::error::$PKG_VERSION 不高于现有 latest ($LATEST)，拒绝让 latest 回退。"
+                exit 1
+              }
+            fi
+            echo "stable $PKG_VERSION → dist-tag latest"
+          fi
+
+      # OIDC 可信发布：CLI 自动用 GitHub 的 OIDC token 换取短期发布凭据，
+      # 并自动生成 provenance 证明（无需 --provenance、无需 NODE_AUTH_TOKEN）。
+      # prepack 会在发布前再跑一次 build，保证发布产物与源码同步。
+      - name: publish (OIDC trusted publishing)
+        run: npm publish --access public --tag "$DIST_TAG"

@@ -8,13 +8,12 @@
  * keyed `user`/`steering` renderers while loaded; unloading restores the
  * built-ins. Value imports stay on platform-shared modules only.
  */
-import { Fragment, memo, useEffect, useId, useRef, useState, type ReactNode } from 'react'
+import { Fragment, memo, useEffect, useId, useRef, useState, type ComponentType, type ReactNode } from 'react'
+import * as primitives from '@deepseek-ai/dsh-client-ui-primitives'
 import {
   fileExtension,
   FileTypeIcon,
   fileSizeText,
-  IconCheckOutline16,
-  IconCopyOutline16,
   JsonBlock,
   projectUserText,
   Tooltip,
@@ -24,7 +23,36 @@ import type { LocaleKey } from './locales.ts'
 import { findRollbackAnchor, hasAttachments, type RollbackEventView } from './rollback.ts'
 import css from './user-message.module.css'
 
+// DSH 0.1.7 renamed the pixel-suffixed product icons to weight names
+// (Icon*Outline16 → Icon*OutlineRegular; DSH-0.1.7-J1-26). ui-primitives is
+// a platform-external module served by the host, so the export either
+// generation provides is resolved at runtime; the weight name wins when both
+// exist. A future host carrying NEITHER name must not take every user node
+// down with React #130 — fall back to a silent no-icon stub and say so once.
+const iconTable = primitives as unknown as Record<string, ComponentType>
+function pickIcon(weightName: string, pixelName: string): ComponentType {
+  const icon = iconTable[weightName] ?? iconTable[pixelName]
+  if (icon !== undefined) return icon
+  console.warn(`[observational-memory] host ui-primitives exports neither ${weightName} nor ${pixelName}; the action renders without an icon`)
+  return () => null
+}
+const IconCheckOutline = pickIcon('IconCheckOutlineRegular', 'IconCheckOutline16')
+const IconCopyOutline = pickIcon('IconCopyOutlineRegular', 'IconCopyOutline16')
+
 export type UserMessageTranslate = (key: LocaleKey, params?: Record<string, string | number>) => string
+
+// The 0.1.7 built-in bubble passes chip actions (openFile/openSkill) as
+// projectUserText's optional fifth argument; 0.1.5's host-served copy takes
+// only four parameters and ignores the extra argument at runtime. The alias
+// keeps the call typechecking against both generations' declarations.
+type ProjectUserText = (
+  text: string,
+  sessionLabels: readonly string[],
+  slashNames: readonly string[],
+  slashKind: 'skill' | 'command',
+  references?: { openFile: (path: string) => void; openSkill: (name: string) => void } | undefined,
+) => ReactNode
+const projectUserTextWithRefs = projectUserText as ProjectUserText
 
 /** The node payload shape this renderer consumes (mirrors UserMessageNode). */
 export interface UserMessageNodeLike {
@@ -35,7 +63,11 @@ export interface UserMessageNodeLike {
   skillNames?: readonly string[]
 }
 
-/** The slot owner share this renderer consumes (mirrors ChatNodeOwnerProps). */
+/** The slot owner share this renderer consumes (mirrors ChatNodeOwnerProps).
+ *  Note: the 0.1.7 owner additions groupPart/openSkill are assistant-node
+ *  concerns (reasoning/response grouping) or chip actions; a user/steering
+ *  bubble legitimately never sees groupPart, and openSkill may be absent on
+ *  0.1.5 — the references pass-through below gates on it. */
 export interface UserMessageOwnerLike {
   node: {
     anchorSeq: number
@@ -44,7 +76,7 @@ export interface UserMessageOwnerLike {
   }
   renderMessageImages: (options: { images: { attachment: unknown }[]; align: 'end'; compact: boolean }) => ReactNode
   openFile: (path: string) => void
-  openSkill: (name: string) => void
+  openSkill?: ((name: string) => void) | undefined
   t: UserMessageTranslate
 }
 
@@ -221,7 +253,7 @@ function UserActions(props: {
       {!props.rollbackAvailable && <span id={reasonId} className={css.visuallyHidden}>{rollbackLabel}</span>}
       <Tooltip label={copied ? t('copied') : t('copy')} side="bottom">
         <button type="button" className={css.action} aria-label={copied ? t('copied') : t('copy')} onClick={onCopy}>
-          {copied ? <IconCheckOutline16 /> : <IconCopyOutline16 />}
+          {copied ? <IconCheckOutline /> : <IconCopyOutline />}
         </button>
       </Tooltip>
     </div>
@@ -294,8 +326,17 @@ export const OmUserMessageNodeView = memo(function OmUserMessageNodeView(
         )}
         {showBubble && (
           <div className={css.bubble}>
-            {/* 4-arg form of the runtime-shared ui-primitives (0.1.5-rc.2). */}
-            {projectUserText(text, referenceLabels, skillNames, 'skill')}
+            {/* Chip actions ride the optional fifth argument: on 0.1.7 the
+                built-in bubble passes { openFile, openSkill }; on 0.1.5
+                openSkill is absent and the host's 4-parameter copy ignores
+                the argument entirely. */}
+            {projectUserTextWithRefs(
+              text,
+              referenceLabels,
+              skillNames,
+              'skill',
+              props.openSkill === undefined ? undefined : { openFile: props.openFile, openSkill: props.openSkill },
+            )}
             {rest.map((block, i) => (
               <JsonBlock key={i} label={t('message.extraBlock')} payload={block} truncatedLabel={truncated} />
             ))}

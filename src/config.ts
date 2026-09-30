@@ -1,14 +1,17 @@
 /**
- * Plugin configuration: one Schemastery schema shared by the cordis
- * composition entry (`config:` in cordis.yml) and the user-editable settings
- * namespace `observational-memory` (Settings → Plugins → Plugin
- * configuration). The namespace keeps user overrides in the DSH user settings
- * document under their own top-level key — the harness's own composition is
- * never touched.
+ * Plugin configuration: one Schemastery field dictionary with two schema
+ * faces. {@link Config} is the cordis composition-entry schema — on DSH
+ * ≥0.1.7 its volatile marks expose the entry to the profile-owned live
+ * settings transport (edits persist in the profile's cordis.patch.yml and
+ * apply live); {@link PlainConfig} is the plain-value face used by
+ * {@link resolveConfig} and by the legacy (DSH ≤0.1.5) settings section,
+ * whose host machinery keeps user overrides in the settings.yaml document
+ * under the `observational-memory` namespace. Either way the harness's own
+ * composition is never touched.
  *
- * Following the harness idiom, {@link Config} is the schema INPUT type (all
- * fields optional); {@link resolveConfig} applies schema defaults to produce
- * the {@link ResolvedConfig} the runtime consumes.
+ * Following the harness idiom, the exported {@link Config} TYPE is the
+ * schema INPUT type (all fields optional); {@link resolveConfig} applies
+ * schema defaults to produce the {@link ResolvedConfig} the runtime consumes.
  */
 import z from '@deepseek-ai/schemastery'
 
@@ -125,7 +128,11 @@ const modelSchema = z.object({
   reasoningEffort: z.string(),
 })
 
-export const Config: z<Config> = z.object({
+/**
+ * The field dictionary, shared by both schema faces below. Every field is
+ * editable from the plugin's settings card.
+ */
+const fields = {
   observeAfterTokens: z.number().step(1).min(1).default(10_000),
   reflectAfterTokens: z.number().step(1).min(1).default(20_000),
   modelFallbackAfterFailures: z.number().step(1).min(0).default(0),
@@ -146,13 +153,75 @@ export const Config: z<Config> = z.object({
   passive: z.boolean().default(false),
   debugLog: z.boolean().default(false),
   storageDir: z.string(),
-})
+}
+
+/**
+ * The composition-entry schema. Every editable field carries `.volatile()`:
+ * on DSH ≥0.1.7 that is what exposes the entry to the profile-owned settings
+ * transport (values persist in the profile's cordis.patch.yml and apply
+ * live). Calling a volatile-marked schema returns live references, so this
+ * face is ONLY for the host's entry machinery — plugin code resolves values
+ * through {@link PlainConfig} and unwraps with {@link unwrapVolatileConfig}.
+ * `.volatile()` needs schemastery ≥3.18.4; the dependency floor in
+ * package.json guarantees it on either host generation. Note the wrapping
+ * happens at schema resolution: on a legacy host whose loader resolves the
+ * entry config through the plugin's own 3.18.4 copy, volatile refs arrive
+ * there too — {@link unwrapVolatileConfig} handles both shapes.
+ */
+export const Config = z.object(
+  Object.fromEntries(Object.entries(fields).map(([key, field]) => [key, field.volatile()]) as never),
+) as unknown as z<Config>
+
+/**
+ * The plain-value schema face: same fields without the volatile mark, so
+ * calling it yields plain values under every supported schemastery. Used by
+ * {@link resolveConfig} and by the legacy (DSH ≤0.1.5) settings section,
+ * whose host machinery predates live references.
+ */
+// Cast: with a mixed schemastery installation (e.g. a 0.1.5-rc.3 host pinning
+// 3.18.2 beside this plugin's 3.18.4) the two copies' Schema declarations
+// defeat the object-literal inference; the annotation above already names the
+// intended input shape.
+export const PlainConfig: z<Config> = z.object(fields) as z<Config>
+
+/**
+ * Minimal shape of the live-configuration reference DSH ≥0.1.7 hands each
+ * volatile Config field (cosmokit's `Volatile<T>`; declared locally because
+ * the type only exists in cordis ≥4.0.4, newer than the oldest supported
+ * host).
+ */
+export interface VolatileRef<T> {
+  get(): T
+}
+
+function isVolatileRef(value: unknown): value is VolatileRef<unknown> {
+  return typeof value === 'object' && value !== null
+    && typeof (value as { get?: unknown }).get === 'function'
+}
+
+/**
+ * Project the composition value the host passed to `apply` into the plain
+ * input shape the schema parses: on DSH ≥0.1.7 each volatile field arrives as
+ * a {@link VolatileRef} whose `get()` reads the current live value; on older
+ * hosts every field is already plain and the projection is an identity.
+ * Only top-level fields unwrap — a nested object (the model override) is one
+ * whole ref when volatile, never a partial one.
+ */
+export function unwrapVolatileConfig(config: Config): Config {
+  const plain: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(config)) {
+    plain[key] = isVolatileRef(value) ? value.get() : value
+  }
+  return plain as Config
+}
 
 /** Apply schema defaults to a partial composition/settings value. */
 export function resolveConfig(config: Config): ResolvedConfig {
-  // The schema value resolves defaults at runtime; the z<Config> typing names
-  // the input shape, so the cast projects to the resolved shape.
-  return Config(config) as ResolvedConfig
+  // Live-config references unwrap before the schema sees the value: a
+  // VolatileRef is not a valid schema input for its field. The plain face
+  // resolves defaults without re-wrapping the result. The z<Config> typing
+  // names the plain input shape, so the cast projects to the resolved shape.
+  return PlainConfig(unwrapVolatileConfig(config)) as ResolvedConfig
 }
 
 /**

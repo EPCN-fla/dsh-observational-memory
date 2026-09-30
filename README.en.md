@@ -42,7 +42,7 @@ flowchart TD
     Hook -->|empty| Native[Native DSH summarizer]
 ```
 
-1. The session proceeds normally; the consolidation pipeline (observer first, then reflector, then dropper) runs from `turn/end` and `agent/session-start` events.
+1. The session proceeds normally; the consolidation pipeline (observer first, then reflector, then dropper) runs from `turn/end` and `agent/created` events.
 2. Each worker has exactly one recording tool; code validates everything the model proposes (source seqs and support ids must exist), and ids are deterministic content hashes.
 3. When DSH's compaction engine makes its summarization call (`purpose: 'compaction'`), the plugin intercepts it in the `llm/stream` waterfall: a non-empty projection is rendered into the summary directly — compaction is instant; an empty projection delegates to the native summarizer.
 4. When the compaction commits, the visible memory is recorded in the ledger for visible-vs-full drift inspection.
@@ -57,7 +57,7 @@ Differences from the Pi version (platform adaptations):
 
 ## Install
 
-Requires deepseek-harness **0.1.5-rc.2** (`@deepseek-ai/dsh-*` packages ≥ 0.1.5-rc.2).
+Requires deepseek-harness **the 0.1.5 prerelease line ≥ rc.2, or 0.1.7-rc.1** (`@deepseek-ai/dsh-*` peer range `>=0.1.5-rc.2 <0.1.5 || 0.1.7-rc.1`; on 0.1.7 the plugin serves the profile-owned live configuration, on 0.1.5 it falls back to the legacy settings.yaml section, and the legacy document is imported automatically on the first 0.1.7 boot).
 
 Add the plugin to a profile through the DSH CLI (`web` shown here; substitute as needed). The package ships a `cordis.patch.yml`, so the composer mounts the host half automatically and serves `/plugins/dsh-observational-memory/client.js` to the Web client — no extra composition wiring.
 
