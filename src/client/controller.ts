@@ -297,7 +297,6 @@ function hasPath(source: unknown, key: string): boolean {
 export class OmCardController {
   private readonly specs = new Map<string, FieldDef>()
   private readonly staged = new Map<string, StagedEdit>()
-  private readonly listeners = new Set<() => void>()
   private saving = false
   private failed = false
   private catalogStatus: OmCardState['catalogStatus'] = 'idle'
@@ -305,6 +304,7 @@ export class OmCardController {
   /** Bumps on every issued catalog request so a late response never wins. */
   private catalogGeneration = 0
   private readonly store: SnapshotStoreLike<OmCardState>
+  private readonly unsubscribeScope: () => void
 
   constructor(
     private readonly scope: SettingsScopeLike,
@@ -313,10 +313,19 @@ export class OmCardController {
   ) {
     for (const field of fields) this.specs.set(field.key, field)
     this.store = createStore(this.projection())
-    scope.subscribe(() => this.publish())
+    this.unsubscribeScope = scope.subscribe(() => this.publish())
     // The model dropdowns need the Host catalog; fetch it once up front so
     // expanding the card never waits on the wire.
     if (rpc !== undefined) void this.loadCatalog()
+  }
+
+  /**
+   * Release the scope subscription. On DSH ≥0.1.7 the underlying form is
+   * provider-owned and shared, so an undisposed controller leaks a listener
+   * into it on every unload/HMR; the plugin's ctx.effect calls this.
+   */
+  dispose(): void {
+    this.unsubscribeScope()
   }
 
   inject(): OmCardFace {
@@ -467,9 +476,7 @@ export class OmCardController {
   }
 
   private publish(): void {
-    const next = this.projection()
-    this.store.set(next)
-    for (const listener of this.listeners) listener()
+    this.store.set(this.projection())
   }
 
   /** Resolve the model object a save would write, or 'clear', or undefined when invalid. */

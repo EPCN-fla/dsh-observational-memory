@@ -118,6 +118,9 @@ export function apply(ctx: Context): void {
 
   if (controller !== undefined) {
     const cardController = controller
+    // Unload/HMR: release the subscription into the (provider-shared on
+    // DSH ≥0.1.7) configuration form so dead controllers stop republishing.
+    ctx.effect(() => () => cardController.dispose(), 'observational-memory: settings card')
     ctx.slots.inject('settings.plugin.item', () =>
       ctx.slots.register(
         {

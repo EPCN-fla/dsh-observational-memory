@@ -356,3 +356,15 @@ describe('resolveSettingsScope (weak dual-generation binding)', () => {
     expect(resolveSettingsScope(() => undefined, 'observational-memory')).toBeUndefined()
   })
 })
+
+describe('OmCardController disposal', () => {
+  it('dispose() releases the scope subscription', async () => {
+    const { OmCardController } = await import('../src/client/controller.ts')
+    const scope = fakeScope({})
+    const controller = new OmCardController(scope, CARD_FIELDS)
+    controller.dispose()
+    // A second dispose is safe, and no error surfaces from a post-dispose write.
+    controller.dispose()
+    await expect(scope.set('passive', true)).resolves.toBeUndefined()
+  })
+})
