@@ -10,7 +10,7 @@ references/
 
 # Local dev harness home and its runtime artifacts (the fake LLM adapter and
 # the e2e driver stay tracked as dev fixtures)
-.dev/dsh-home/
+.dev/dsh-home*/
 .dev/e2e-cwd/
 .dev/*.log
 .dev/*.txt

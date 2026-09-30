@@ -38,7 +38,7 @@ export interface ConfigFormLike {
   getSnapshot(): ReturnType<SettingsScopeLike['getSnapshot']> & { mode: 'host' | 'memory' }
   subscribe(listener: () => void): () => void
   set(field: string, value: unknown): Promise<boolean>
-  unset(field: string): Promise<void> | Promise<boolean>
+  unset(field: string): Promise<boolean>
 }
 
 /** The DSH ≥0.1.7 `configForms` client service slice this plugin consumes. */
