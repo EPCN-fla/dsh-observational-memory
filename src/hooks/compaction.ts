@@ -72,6 +72,8 @@ export function registerCompactionHook(ctx: Context, runtime: OmRuntime): void {
       if (!session) return yield* next()
       if (session.header.origin === 'subagent') return yield* next()
 
+      // Pick up live (DSH ≥0.1.7 volatile) profile edits before reading config.
+      runtime.refreshConfig()
       let parked: PendingVisible
       try {
         // A forked branch renders from the memory it inherited at the cut.

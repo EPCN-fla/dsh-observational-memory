@@ -9,7 +9,11 @@
  *
  * Configuration lives in the `observational-memory` settings namespace
  * (Settings → Plugins → Plugin configuration), layered over the cordis
- * composition entry; the harness's own configuration is never touched.
+ * composition entry; the harness's own configuration is never touched. Two
+ * host generations are served from one apply: DSH ≤0.1.5 edits the namespace
+ * through the legacy settings section (`installSection`), DSH ≥0.1.7 edits
+ * the profile-owned live configuration (volatile Config fields persisted in
+ * the profile's cordis.patch.yml).
  */
 import type { Context } from '@deepseek-ai/cordis'
 // Type-only: service merges for ctx.settings / ctx.agents / ctx.llm / ctx.sessions.
@@ -17,7 +21,7 @@ import type {} from '@deepseek-ai/dsh-settings'
 import type {} from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-session'
-import { Config, SETTINGS_NAMESPACE } from './config.ts'
+import { Config, PlainConfig, SETTINGS_NAMESPACE, unwrapVolatileConfig } from './config.ts'
 import { OmRuntime } from './runtime.ts'
 import { OmApiService } from './api.ts'
 import { registerCompactionHook } from './hooks/compaction.ts'
@@ -31,23 +35,57 @@ export const inject = ['llm', 'tools', 'sessions', 'agents']
 export { Config, SETTINGS_NAMESPACE }
 export type { Config as ConfigShape } from './config.ts'
 
+/**
+ * The legacy settings-section face (DSH ≤0.1.5) the old path binds; removed
+ * from the host in 0.1.7, detected by the presence of `installSection`.
+ */
+interface LegacySettingsSection {
+  installSection(
+    ctx: Context,
+    namespace: string,
+    schema: unknown,
+    base: Config,
+    hooks: { setSource: (source: () => Config) => void; onChange: () => void },
+  ): void
+}
+
 export function apply(ctx: Context, config: Config): void {
   const runtime = new OmRuntime(config, {
     onError: (message) => ctx.logger.warn(message),
   })
 
-  // Settings section: the composition entry is the base layer; user edits in
-  // the settings document apply live on top of it.
+  // The live-config source: the composition entry by itself until a settings
+  // layer joins. On DSH ≥0.1.7 the entry's volatile fields are refs whose
+  // get() tracks profile edits, so polling this source sees them; trigger
+  // points poll through runtime.refreshConfig().
   let source: () => Config = () => config
+  runtime.bindConfigSource(() => source())
   ctx.inject(['settings'], (settingsCtx) => {
-    settingsCtx.settings.installSection(ctx, SETTINGS_NAMESPACE, Config, config, {
-      setSource: (current) => {
-        source = current
-      },
-      onChange: () => {
-        runtime.setConfig(source())
-      },
-    })
+    const settings = settingsCtx.settings as unknown as Partial<LegacySettingsSection> & {
+      configure?: (presentation: { auto: boolean }, owner?: unknown) => () => void
+    }
+    if (typeof settings.installSection === 'function') {
+      // DSH ≤0.1.5 — the legacy settings document: the composition entry is
+      // the base layer; user edits apply live on top of it. The legacy host
+      // machinery predates live references, so it gets the plain schema face
+      // and the unwrapped composition value.
+      settings.installSection(ctx, SETTINGS_NAMESPACE, PlainConfig, unwrapVolatileConfig(config), {
+        setSource: (current) => {
+          source = current
+        },
+        onChange: () => {
+          runtime.setConfig(source())
+        },
+      })
+      return
+    }
+    // DSH ≥0.1.7 — profile-owned live configuration: claim the custom page
+    // (the browser half renders it on the Plugins page) and let the host
+    // persist edits into the profile patch. The old settings.yaml section is
+    // imported into this entry automatically on first boot.
+    if (typeof settings.configure === 'function') {
+      settingsCtx.effect(() => settings.configure!({ auto: false }, ctx.fiber))
+    }
   })
 
   registerConsolidationTrigger(ctx, runtime)

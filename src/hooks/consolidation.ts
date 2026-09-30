@@ -89,6 +89,8 @@ function launch(ctx: Context, runtime: OmRuntime, session: Session): void {
 
 /** Exported for tests; the triggers above are the production callers. */
 export async function maybeLaunchConsolidation(ctx: Context, runtime: OmRuntime, session: Session): Promise<void> {
+  // Pick up live (DSH ≥0.1.7 volatile) profile edits; a no-op when unchanged.
+  runtime.refreshConfig()
   // Inheriting a fork parent's ledger is not a proactive trigger: passive
   // mode keeps it, so a rolled-back branch holds on to the memory it shares
   // with its source even with every background worker disabled.
@@ -124,6 +126,7 @@ export async function maybeLaunchConsolidation(ctx: Context, runtime: OmRuntime,
  * run is already active for the session.
  */
 export async function runConsolidationNow(ctx: Context, runtime: OmRuntime, session: Session): Promise<boolean> {
+  runtime.refreshConfig()
   if (session.header.origin === 'subagent') return false
   const sessionId: string = session.id
   if (runtime.consolidationInFlight.has(sessionId)) return false
