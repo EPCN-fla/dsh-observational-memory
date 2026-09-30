@@ -309,7 +309,7 @@ export const OmUserMessageNodeView = memo(function OmUserMessageNodeView(
         )}
         {showBubble && (
           <div className={css.bubble}>
-            {/* 4-arg form of the runtime-shared ui-primitives (0.1.5-rc.2). */}
+            {/* 4-arg form of the runtime-shared ui-primitives (0.1.5-rc.2; 0.1.7 keeps the same four parameters and only appends an optional fifth). */}
             {projectUserText(text, referenceLabels, skillNames, 'skill')}
             {rest.map((block, i) => (
               <JsonBlock key={i} label={t('message.extraBlock')} payload={block} truncatedLabel={truncated} />

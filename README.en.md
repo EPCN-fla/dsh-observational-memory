@@ -42,7 +42,7 @@ flowchart TD
     Hook -->|empty| Native[Native DSH summarizer]
 ```
 
-1. The session proceeds normally; the consolidation pipeline (observer first, then reflector, then dropper) runs from `turn/end` and `agent/session-start` events.
+1. The session proceeds normally; the consolidation pipeline (observer first, then reflector, then dropper) runs from `turn/end` and `agent/created` events.
 2. Each worker has exactly one recording tool; code validates everything the model proposes (source seqs and support ids must exist), and ids are deterministic content hashes.
 3. When DSH's compaction engine makes its summarization call (`purpose: 'compaction'`), the plugin intercepts it in the `llm/stream` waterfall: a non-empty projection is rendered into the summary directly — compaction is instant; an empty projection delegates to the native summarizer.
 4. When the compaction commits, the visible memory is recorded in the ledger for visible-vs-full drift inspection.

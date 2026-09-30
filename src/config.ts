@@ -1,14 +1,17 @@
 /**
- * Plugin configuration: one Schemastery schema shared by the cordis
- * composition entry (`config:` in cordis.yml) and the user-editable settings
- * namespace `observational-memory` (Settings → Plugins → Plugin
- * configuration). The namespace keeps user overrides in the DSH user settings
- * document under their own top-level key — the harness's own composition is
- * never touched.
+ * Plugin configuration: one Schemastery field dictionary with two schema
+ * faces. {@link Config} is the cordis composition-entry schema — on DSH
+ * ≥0.1.7 its volatile marks expose the entry to the profile-owned live
+ * settings transport (edits persist in the profile's cordis.patch.yml and
+ * apply live); {@link PlainConfig} is the plain-value face used by
+ * {@link resolveConfig} and by the legacy (DSH ≤0.1.5) settings section,
+ * whose host machinery keeps user overrides in the settings.yaml document
+ * under the `observational-memory` namespace. Either way the harness's own
+ * composition is never touched.
  *
- * Following the harness idiom, {@link Config} is the schema INPUT type (all
- * fields optional); {@link resolveConfig} applies schema defaults to produce
- * the {@link ResolvedConfig} the runtime consumes.
+ * Following the harness idiom, the exported {@link Config} TYPE is the
+ * schema INPUT type (all fields optional); {@link resolveConfig} applies
+ * schema defaults to produce the {@link ResolvedConfig} the runtime consumes.
  */
 import z from '@deepseek-ai/schemastery'
 
@@ -160,8 +163,10 @@ const fields = {
  * face is ONLY for the host's entry machinery — plugin code resolves values
  * through {@link PlainConfig} and unwraps with {@link unwrapVolatileConfig}.
  * `.volatile()` needs schemastery ≥3.18.4; the dependency floor in
- * package.json guarantees it on either host generation (older hosts' cordis
- * ignores the mark beyond the wrapping we unwrap ourselves).
+ * package.json guarantees it on either host generation. Note the wrapping
+ * happens at schema resolution: on a legacy host whose loader resolves the
+ * entry config through the plugin's own 3.18.4 copy, volatile refs arrive
+ * there too — {@link unwrapVolatileConfig} handles both shapes.
  */
 export const Config = z.object(
   Object.fromEntries(Object.entries(fields).map(([key, field]) => [key, field.volatile()]) as never),

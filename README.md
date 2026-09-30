@@ -42,7 +42,7 @@ flowchart TD
     Hook -->|记忆为空| Native[回退 DSH 原生摘要]
 ```
 
-1. 会话正常推进；`turn/end` 与 `agent/session-start` 事件驱动整合流水线（观察器优先，随后反思器，最后清理器）。
+1. 会话正常推进；`turn/end` 与 `agent/created` 事件驱动整合流水线（观察器优先，随后反思器，最后清理器）。
 2. 每个 worker 只有一个记录工具，由代码校验模型产出（来源 seq、支撑 id 必须真实存在），id 由内容哈希确定性生成。
 3. DSH 压缩引擎做摘要调用时（`purpose: 'compaction'`），本插件在 `llm/stream` 瀑布中拦截：投影非空则直接返回渲染好的记忆文本，压缩零等待；投影为空则放行原生摘要。
 4. 压缩提交后，可见记忆（visible memory）记入账本，供状态对比（drift）使用。
