@@ -14,6 +14,11 @@ vi.mock('@deepseek-ai/dsh-client-ui-primitives', () => ({
   fileExtension: (name: string) => name.split('.').at(-1) ?? '',
   FileTypeIcon: () => null,
   fileSizeText: (bytes: number) => `${bytes} B`,
+  // Legacy 0.1.5-rc.2 pixel-suffixed exports: the runtime fallback in
+  // user-message.tsx must still find these when no weight names exist
+  // (undefined = absent from the host's module table, as on 0.1.5-rc.2).
+  IconCheckOutlineRegular: undefined,
+  IconCopyOutlineRegular: undefined,
   IconCheckOutline16: () => createElement('span', { 'data-icon': 'check' }),
   IconCopyOutline16: () => createElement('span', { 'data-icon': 'copy' }),
   JsonBlock: () => null,

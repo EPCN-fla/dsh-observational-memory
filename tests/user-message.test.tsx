@@ -11,8 +11,10 @@ vi.mock('@deepseek-ai/dsh-client-ui-primitives', () => ({
   fileExtension: (name: string) => name.split('.').at(-1) ?? '',
   FileTypeIcon: () => null,
   fileSizeText: (bytes: number) => `${bytes} B`,
-  IconCheckOutline16: () => createElement('span', { 'data-icon': 'check' }),
-  IconCopyOutline16: () => createElement('span', { 'data-icon': 'copy' }),
+  // DSH ≥0.1.7 weight-name exports (no pixel-suffixed entries): the runtime
+  // fallback in user-message.tsx must pick these.
+  IconCheckOutlineRegular: () => createElement('span', { 'data-icon': 'check' }),
+  IconCopyOutlineRegular: () => createElement('span', { 'data-icon': 'copy' }),
   JsonBlock: () => null,
   projectUserText: (text: string) => text,
   Tooltip: (props: { children?: ReactNode }) => createElement(Fragment_ => props.children, null),

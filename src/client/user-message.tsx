@@ -8,13 +8,12 @@
  * keyed `user`/`steering` renderers while loaded; unloading restores the
  * built-ins. Value imports stay on platform-shared modules only.
  */
-import { Fragment, memo, useEffect, useId, useRef, useState, type ReactNode } from 'react'
+import { Fragment, memo, useEffect, useId, useRef, useState, type ComponentType, type ReactNode } from 'react'
+import * as primitives from '@deepseek-ai/dsh-client-ui-primitives'
 import {
   fileExtension,
   FileTypeIcon,
   fileSizeText,
-  IconCheckOutline16,
-  IconCopyOutline16,
   JsonBlock,
   projectUserText,
   Tooltip,
@@ -23,6 +22,15 @@ import {
 import type { LocaleKey } from './locales.ts'
 import { findRollbackAnchor, hasAttachments, type RollbackEventView } from './rollback.ts'
 import css from './user-message.module.css'
+
+// DSH 0.1.7 renamed the pixel-suffixed product icons to weight names
+// (Icon*Outline16 → Icon*OutlineRegular; DSH-0.1.7-J1-26). ui-primitives is
+// a platform-external module served by the host, so the export either
+// generation provides is resolved at runtime; the weight name wins when both
+// exist.
+const iconTable = primitives as unknown as Record<string, ComponentType>
+const IconCheckOutline = iconTable.IconCheckOutlineRegular ?? iconTable.IconCheckOutline16
+const IconCopyOutline = iconTable.IconCopyOutlineRegular ?? iconTable.IconCopyOutline16
 
 export type UserMessageTranslate = (key: LocaleKey, params?: Record<string, string | number>) => string
 
@@ -221,7 +229,7 @@ function UserActions(props: {
       {!props.rollbackAvailable && <span id={reasonId} className={css.visuallyHidden}>{rollbackLabel}</span>}
       <Tooltip label={copied ? t('copied') : t('copy')} side="bottom">
         <button type="button" className={css.action} aria-label={copied ? t('copied') : t('copy')} onClick={onCopy}>
-          {copied ? <IconCheckOutline16 /> : <IconCopyOutline16 />}
+          {copied ? <IconCheckOutline /> : <IconCopyOutline />}
         </button>
       </Tooltip>
     </div>
