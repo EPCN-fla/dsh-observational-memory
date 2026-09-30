@@ -41,6 +41,19 @@ const IconCopyOutline = pickIcon('IconCopyOutlineRegular', 'IconCopyOutline16')
 
 export type UserMessageTranslate = (key: LocaleKey, params?: Record<string, string | number>) => string
 
+// The 0.1.7 built-in bubble passes chip actions (openFile/openSkill) as
+// projectUserText's optional fifth argument; 0.1.5's host-served copy takes
+// only four parameters and ignores the extra argument at runtime. The alias
+// keeps the call typechecking against both generations' declarations.
+type ProjectUserText = (
+  text: string,
+  sessionLabels: readonly string[],
+  slashNames: readonly string[],
+  slashKind: 'skill' | 'command',
+  references?: { openFile: (path: string) => void; openSkill: (name: string) => void } | undefined,
+) => ReactNode
+const projectUserTextWithRefs = projectUserText as ProjectUserText
+
 /** The node payload shape this renderer consumes (mirrors UserMessageNode). */
 export interface UserMessageNodeLike {
   seq: number
@@ -50,7 +63,11 @@ export interface UserMessageNodeLike {
   skillNames?: readonly string[]
 }
 
-/** The slot owner share this renderer consumes (mirrors ChatNodeOwnerProps). */
+/** The slot owner share this renderer consumes (mirrors ChatNodeOwnerProps).
+ *  Note: the 0.1.7 owner additions groupPart/openSkill are assistant-node
+ *  concerns (reasoning/response grouping) or chip actions; a user/steering
+ *  bubble legitimately never sees groupPart, and openSkill may be absent on
+ *  0.1.5 — the references pass-through below gates on it. */
 export interface UserMessageOwnerLike {
   node: {
     anchorSeq: number
@@ -59,7 +76,7 @@ export interface UserMessageOwnerLike {
   }
   renderMessageImages: (options: { images: { attachment: unknown }[]; align: 'end'; compact: boolean }) => ReactNode
   openFile: (path: string) => void
-  openSkill: (name: string) => void
+  openSkill?: ((name: string) => void) | undefined
   t: UserMessageTranslate
 }
 
@@ -309,8 +326,17 @@ export const OmUserMessageNodeView = memo(function OmUserMessageNodeView(
         )}
         {showBubble && (
           <div className={css.bubble}>
-            {/* 4-arg form of the runtime-shared ui-primitives (0.1.5-rc.2; 0.1.7 keeps the same four parameters and only appends an optional fifth). */}
-            {projectUserText(text, referenceLabels, skillNames, 'skill')}
+            {/* Chip actions ride the optional fifth argument: on 0.1.7 the
+                built-in bubble passes { openFile, openSkill }; on 0.1.5
+                openSkill is absent and the host's 4-parameter copy ignores
+                the argument entirely. */}
+            {projectUserTextWithRefs(
+              text,
+              referenceLabels,
+              skillNames,
+              'skill',
+              props.openSkill === undefined ? undefined : { openFile: props.openFile, openSkill: props.openSkill },
+            )}
             {rest.map((block, i) => (
               <JsonBlock key={i} label={t('message.extraBlock')} payload={block} truncatedLabel={truncated} />
             ))}
