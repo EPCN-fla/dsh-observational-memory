@@ -27,10 +27,17 @@ import css from './user-message.module.css'
 // (Icon*Outline16 → Icon*OutlineRegular; DSH-0.1.7-J1-26). ui-primitives is
 // a platform-external module served by the host, so the export either
 // generation provides is resolved at runtime; the weight name wins when both
-// exist.
+// exist. A future host carrying NEITHER name must not take every user node
+// down with React #130 — fall back to a silent no-icon stub and say so once.
 const iconTable = primitives as unknown as Record<string, ComponentType>
-const IconCheckOutline = iconTable.IconCheckOutlineRegular ?? iconTable.IconCheckOutline16
-const IconCopyOutline = iconTable.IconCopyOutlineRegular ?? iconTable.IconCopyOutline16
+function pickIcon(weightName: string, pixelName: string): ComponentType {
+  const icon = iconTable[weightName] ?? iconTable[pixelName]
+  if (icon !== undefined) return icon
+  console.warn(`[observational-memory] host ui-primitives exports neither ${weightName} nor ${pixelName}; the action renders without an icon`)
+  return () => null
+}
+const IconCheckOutline = pickIcon('IconCheckOutlineRegular', 'IconCheckOutline16')
+const IconCopyOutline = pickIcon('IconCopyOutlineRegular', 'IconCopyOutline16')
 
 export type UserMessageTranslate = (key: LocaleKey, params?: Record<string, string | number>) => string
 
