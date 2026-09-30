@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Session } from '@deepseek-ai/dsh-session'
 import { Config } from '../src/config.ts'
 import { maybeLaunchConsolidation, runConsolidationNow } from '../src/hooks/consolidation.ts'
@@ -498,5 +498,28 @@ describe('manual consolidation run (Memory tab "run now")', () => {
     await expect(runConsolidationNow(ctx, runtime, subagent)).resolves.toBe(false)
     expect(callCount()).toBe(0)
     expect(runtime.consolidationInFlight.size).toBe(0)
+  })
+})
+
+describe('consolidation triggers', () => {
+  it('subscribes to agent/created (agent/session-start was removed in DSH 0.1.6) and launches on creation', async () => {
+    const events = longConversation(20)
+    const { ctx, callCount } = fakeCtx([{ text: 'nothing worth recording' }])
+    const handlers = new Map<string, (...args: never[]) => void>()
+    ctx.on = (event: string, handler: (...args: never[]) => void) => {
+      handlers.set(event, handler)
+      return () => {}
+    }
+    const runtime = new OmRuntime(Config({ observeAfterTokens: 10, storageDir: dir }), { onError: () => {} })
+    const { registerConsolidationTrigger } = await import('../src/hooks/consolidation.ts')
+    registerConsolidationTrigger(ctx as never, runtime)
+
+    expect(handlers.has('agent/session-start')).toBe(false)
+    const created = handlers.get('agent/created')
+    expect(created).toBeDefined()
+    const session = fakeSession(events)
+    created!({ agent: { session } } as never)
+    // The launch is async; let the claimed in-flight slot settle.
+    await vi.waitFor(() => expect(callCount()).toBeGreaterThan(0))
   })
 })
