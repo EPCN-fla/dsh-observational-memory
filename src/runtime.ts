@@ -73,6 +73,13 @@ export class OmRuntime {
   readonly overrideSuspensionNotified = new Set<string>()
   /** Consecutive deliberate-empty observer verdicts per session (warns from the 2nd on). */
   readonly observerConsecutiveEmpties = new Map<string, number>()
+  /**
+   * Context-window lookups per route. The host re-calls the adapter on every
+   * resolveModelInfo, and ratio mode resolves on every idle event and status
+   * poll; route windows are static for the adapter's lifetime, so cache both
+   * hits and (as undefined) unresolvable routes.
+   */
+  private readonly contextWindowCache = new Map<string, number | undefined>()
 
   constructor(initialConfig: Config, hooks: { onError: (message: string) => void }) {
     this._config = resolveConfig(initialConfig)
@@ -298,12 +305,17 @@ export class OmRuntime {
           ? { provider: agent.options.provider, model: agent.options.model }
           : defaultSelection(ctx)
     if (!target) return undefined
+    const key = `${target.provider}/${target.model}`
+    if (this.contextWindowCache.has(key)) return this.contextWindowCache.get(key)
+    let window: number | undefined
     try {
       const info = await ctx.llm.resolveModelInfo(target.provider, target.model)
-      return info.context?.contextWindow
+      window = info.context?.contextWindow
     } catch {
-      return undefined
+      window = undefined
     }
+    this.contextWindowCache.set(key, window)
+    return window
   }
 
   /**

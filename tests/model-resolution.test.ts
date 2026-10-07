@@ -61,4 +61,15 @@ describe('OmRuntime.resolveModel override suspension', () => {
     expect(warnings.filter((message) => message.includes('is unavailable'))).toHaveLength(2)
     expect(warnings.filter((message) => message.includes('suspended'))).toHaveLength(1)
   })
+
+  it('memoizes session context windows per route', async () => {
+    const runtime = new OmRuntime(PlainConfig({ storageDir: dir }), { onError: () => {} })
+    const calls: string[] = []
+    const ctx = fakeCtx(calls)
+    const first = await runtime.sessionContextWindow(ctx, session, undefined)
+    const second = await runtime.sessionContextWindow(ctx, session, undefined)
+    expect(first).toBe(200_000)
+    expect(second).toBe(200_000)
+    expect(calls).toHaveLength(1)
+  })
 })
