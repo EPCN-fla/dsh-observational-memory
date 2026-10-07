@@ -13,7 +13,7 @@ function fakeRpc(handlers: Record<string, Handler>): ConnectionRpcLike & { calls
       const handler = handlers[endpoint]
       if (handler === undefined) return { ok: false, error: { code: 'test/unknown', message: `unknown endpoint ${endpoint}` } }
       const request = (payload as { args: { request: Record<string, unknown> } }).args.request
-      return { ok: true, value: handler(request) }
+      return { ok: true, value: await handler(request) }
     },
   }
 }
