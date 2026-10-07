@@ -39,17 +39,29 @@ const SUPPORTED_HOSTS = [
   // every consumed contract verified identical).
   '0.1.7-rc.1',
   '0.1.7-rc.2',
-  // The 0.2 window (opened by `|| ^0.2.0-rc.1`, which also admits the 0.2.0
-  // final and 0.2.x patches; rc.1/rc.2 audited — no consumed surface moved).
+  // 0.2.0 release candidates (rc.1/rc.2 audited — no consumed surface moved).
   '0.2.0-rc.1',
   '0.2.0-rc.2',
+  // The windows are `>=`-floored inside each prerelease line by design:
+  // future rcs of an already-audited line install without a plugin release.
+  '0.1.7-rc.99',
+  '0.2.0-rc.99',
 ] as const
 
-/** Hosts the range must keep refusing: unverified neighbors. */
+/**
+ * Hosts the range must keep refusing. The windows close BELOW each line's
+ * final release on purpose: only audited prerelease lines are admitted, so
+ * a final (0.1.7, 0.2.0) or the next line (0.2.1-alpha.1) always requires a
+ * conscious range widening here — never a silent install.
+ */
 const REFUSED_HOSTS = [
   '0.1.4',
   '0.1.5-rc.1',
+  '0.1.5',
   '0.1.6',
+  '0.1.7',
+  '0.2.0',
+  '0.2.1-alpha.1',
   '0.3.0',
 ] as const
 
