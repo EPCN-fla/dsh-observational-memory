@@ -19,7 +19,11 @@ export type LedgerStoreOptions = {
 
 /** Sanitize a session id into a safe single-component file name. */
 export function ledgerFileName(sessionId: string): string {
-  const safe = sessionId.replace(/[^a-zA-Z0-9_-]/g, (ch) => `_${ch.codePointAt(0)?.toString(16)}_`)
+  // `_` doubles first so the `_xx_` escapes stay unambiguous: without it,
+  // `a/b` and the literal id `a_2f_b` would map to the same file.
+  const safe = sessionId
+    .replace(/_/g, '__')
+    .replace(/[^a-zA-Z0-9_-]/g, (ch) => `_${ch.codePointAt(0)?.toString(16)}_`)
   return `${safe}.jsonl`
 }
 

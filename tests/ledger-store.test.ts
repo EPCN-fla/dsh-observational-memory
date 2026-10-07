@@ -89,7 +89,11 @@ describe('LedgerStore', () => {
   })
 
   it('sanitizes session ids into safe file names', () => {
-    expect(ledgerFileName('abc-123_OK')).toBe('abc-123_OK.jsonl')
+    expect(ledgerFileName('abc-123-OK')).toBe('abc-123-OK.jsonl')
     expect(ledgerFileName('a/b:c')).toBe('a_2f_b_3a_c.jsonl')
+    // Injective: a literal underscore doubles, so an escaped id can never
+    // collide with one that needed escaping (`a/b` vs `a_2f_b`).
+    expect(ledgerFileName('a_2f_b')).toBe('a__2f__b.jsonl')
+    expect(ledgerFileName('a/b')).not.toBe(ledgerFileName('a_2f_b'))
   })
 })
