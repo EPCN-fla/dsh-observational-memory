@@ -43,6 +43,12 @@ describe('runObserver', () => {
           relevance: 'low',
           sourceEventSeqs: [99],
         },
+        {
+          timestamp: '2026-01-15 14:32',
+          content: 'Multi-line content\ngets rejected like the reflector rejects it.',
+          relevance: 'low',
+          sourceEventSeqs: [2],
+        },
       ]),
     )
 
