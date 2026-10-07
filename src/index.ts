@@ -74,7 +74,14 @@ export function apply(ctx: Context, config: Config): void {
           source = current
         },
         onChange: () => {
-          runtime.setConfig(source())
+          // Same guard as refreshConfig: a schema-invalid edit must not
+          // throw into the host's settings dispatch — keep the last good
+          // epoch and log the rejection instead.
+          try {
+            runtime.setConfig(source())
+          } catch (error) {
+            ctx.logger.warn(`[observational-memory] rejected an invalid settings edit; keeping the previous values: ${error instanceof Error ? error.message : String(error)}`)
+          }
         },
       })
       return
