@@ -182,15 +182,15 @@ export class OmMemoryController {
   /** Switch the `/om:view` projection and refetch just that section. */
   async setViewMode(mode: MemoryViewMode): Promise<void> {
     if (mode === this.current.viewMode) return
-    const previousMode = this.current.viewMode
     const generation = ++this.generation
-    this.publish({ ...this.current, viewMode: mode, refreshing: true })
+    // The label flips only once its content lands: an optimistic flip would
+    // show the new scope's label above the previous scope's text — the same
+    // misrepresentation the failure path below refuses to commit to.
+    this.publish({ ...this.current, refreshing: true })
     const view = await this.attempt(this.fetch('observationalMemory/view', { sessionId: this.sessionId, mode }, isTextResult))
     if (generation !== this.generation) return
     this.publish(view.ok
-      ? { ...this.current, viewText: view.value.text, error: undefined, failedAction: undefined, refreshing: false }
-      // On failure keep the previous mode selected over its matching content:
-      // a flipped label above stale text would misrepresent the scope.
-      : { ...this.current, viewMode: previousMode, error: view.message, failedAction: 'refresh', refreshing: false })
+      ? { ...this.current, viewMode: mode, viewText: view.value.text, error: undefined, failedAction: undefined, refreshing: false }
+      : { ...this.current, error: view.message, failedAction: 'refresh', refreshing: false })
   }
 }

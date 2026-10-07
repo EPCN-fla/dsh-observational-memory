@@ -67,6 +67,25 @@ describe('OmMemoryController', () => {
     expect(rpc.calls).toEqual(['observationalMemory/view'])
   })
 
+  it('keeps the previous mode label over its content until the new scope lands', async () => {
+    // A mode flip shown above the previous scope's text would misrepresent
+    // the scope; the label only flips once its own content arrives.
+    let resolveView: ((value: unknown) => void) | undefined
+    const rpc = fakeRpc({
+      'observationalMemory/view': () => new Promise((resolve) => {
+        resolveView = resolve
+      }),
+    })
+    const controller = new OmMemoryController(rpc, 'session-1')
+    const switching = controller.setViewMode('full')
+    expect(controller.getSnapshot().viewMode).toBe('visible')
+    expect(controller.getSnapshot().refreshing).toBe(true)
+    resolveView?.({ text: 'VIEW:full' })
+    await switching
+    expect(controller.getSnapshot().viewMode).toBe('full')
+    expect(controller.getSnapshot().viewText).toBe('VIEW:full')
+  })
+
   it('runs a manual consolidation on the host, then re-pulls the reports', async () => {
     const rpc = fakeRpc({
       'observationalMemory/run': () => ({ ran: true }),
