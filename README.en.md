@@ -61,10 +61,10 @@ Requires a deepseek-harness **0.1.5 prerelease (≥ rc.2), 0.1.7 prerelease (≥
 
 | Plugin version | Compatible DSH versions (peer-range semantics) |
 | --- | --- |
-| main (unreleased) | 0.1.5-rc.2 ~ <0.1.5, 0.1.7-rc.1 ~ <0.1.7, 0.2.0-rc.1 ~ <0.2.0 |
+| 0.3.0 | 0.1.5-rc.2 ~ <0.1.5, 0.1.7-rc.1 ~ <0.1.7, 0.2.0-rc.1 ~ <0.2.0 |
 | 0.2.0 | 0.1.5-rc.2 ~ <0.1.5, 0.1.7-rc.1 |
-| 0.1.4 | ≥0.1.5-rc.2 (open-ended; upgrade recommended) |
-| 0.1.2 – 0.1.3 | 0.1.5-rc.2 only (exact pin) |
+| 0.1.4 | ≥0.1.5-rc.2 |
+| 0.1.2 – 0.1.3 | 0.1.5-rc.2 |
 
 On 0.1.7 and later the plugin serves the profile-owned live configuration; on 0.1.5 it falls back to the legacy settings.yaml section, and the legacy document is imported automatically on the first 0.1.7 boot.
 
