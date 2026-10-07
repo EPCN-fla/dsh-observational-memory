@@ -39,6 +39,10 @@ const SUPPORTED_HOSTS = [
   // every consumed contract verified identical).
   '0.1.7-rc.1',
   '0.1.7-rc.2',
+  // The 0.2 window (opened by `|| ^0.2.0-rc.1`, which also admits the 0.2.0
+  // final and 0.2.x patches; rc.1/rc.2 audited — no consumed surface moved).
+  '0.2.0-rc.1',
+  '0.2.0-rc.2',
 ] as const
 
 /** Hosts the range must keep refusing: unverified neighbors. */
@@ -46,10 +50,6 @@ const REFUSED_HOSTS = [
   '0.1.4',
   '0.1.5-rc.1',
   '0.1.6',
-  // The 0.2 window is not open yet at this commit; the 0.2.0-rc.1 edge
-  // commit opens it and moves these entries into SUPPORTED_HOSTS.
-  '0.2.0-rc.1',
-  '0.2.0-rc.2',
   '0.3.0',
 ] as const
 
