@@ -80,10 +80,14 @@ export function toolResultEvent(callId: string, text: string, seq?: number): Eve
     data: {
       turn: 0,
       step: 0,
+      // The DSH ≥0.1.7 shape: a tool-role message with the call id at the top
+      // level (mirrored in source.callId). 0.1.5's user-role variant is
+      // covered by the serializer's source.callId fallback.
       message: {
         id: `m-${seq ?? seqCounter}`,
-        role: 'user',
-        content: [{ type: 'tool-result', toolCallId: callId, content: [{ type: 'text', text }] }],
+        role: 'tool',
+        toolCallId: callId,
+        content: [{ type: 'tool-result', content: [{ type: 'text', text }] }],
         source: { kind: 'tool', callId },
       },
     },

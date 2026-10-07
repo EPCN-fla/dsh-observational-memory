@@ -31,6 +31,17 @@ describe('serializeSourceEvents', () => {
     expect(text).not.toContain('turn')
   })
 
+  it('resolves the tool name from the 0.1.5 user-role tool-result shape', () => {
+    resetSeqs()
+    // DSH 0.1.5: role 'user', call id only at source.callId (no top-level field).
+    const legacy = toolResultEvent('c1', 'README.md')
+    const data = legacy.data as { message: Record<string, unknown> }
+    delete data.message.toolCallId
+    data.message.role = 'user'
+    const text = serializeSourceEvents([toolCallEvent('c1', 'bash', '{}'), legacy])
+    expect(text).toContain('[Tool result for bash @ 2026-01-15 14:32]: README.md')
+  })
+
   it('renders assistant tool calls and thinking as placeholders', () => {
     resetSeqs()
     const event = assistantEvent('Working on it.')

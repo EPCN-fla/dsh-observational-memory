@@ -114,11 +114,14 @@ function eventMessage(event: EventView): { content?: unknown; source?: unknown }
 
 /** Tool call id carried by a tool/result event. */
 function toolCallIdOf(event: EventView): string | undefined {
-  const message = eventMessage(event)
-  const content = message?.content
-  if (!Array.isArray(content)) return undefined
-  const block = content[0] as { toolCallId?: unknown } | undefined
-  return typeof block?.toolCallId === 'string' ? block.toolCallId : undefined
+  const message = eventMessage(event) as
+    | { toolCallId?: unknown; source?: { callId?: unknown } }
+    | undefined
+  // DSH ≥0.1.7 carries the id on the tool-role message itself (and mirrors it
+  // at source.callId); 0.1.5's user-role tool result only has source.callId.
+  if (typeof message?.toolCallId === 'string') return message.toolCallId
+  const callId = message?.source?.callId
+  return typeof callId === 'string' ? callId : undefined
 }
 
 /** callId → tool name index from `tool/call` events, for tool-result labels. */
