@@ -45,6 +45,85 @@ function makeController(scope: SettingsScopeLike) {
   return { controller, face, state: () => face.hooks.omCard.getSnapshot() }
 }
 
+describe('OmCardController save failure paths', () => {
+  it('keeps drafts and flags the failure when the write rejects', async () => {
+    const scope = fakeScope({})
+    const failing: SettingsScopeLike = {
+      ...scope,
+      set: async () => {
+        throw new Error('profile storage is read-only')
+      },
+    }
+    const { face, state } = makeController(failing)
+    face.edit('observeAfterTokens', '5000')
+    face.save()
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(state().failed).toBe(true)
+    expect(state().saving).toBe(false)
+    expect(state().dirty).toBe(true) // drafts kept for correction
+    expect(state().fields.observeAfterTokens.text).toBe('5000')
+  })
+
+  it('flags the failure when the user layer silently refuses the write', async () => {
+    const scope = fakeScope({})
+    const silent: SettingsScopeLike = {
+      ...scope,
+      set: async () => {}, // resolves but never lands
+    }
+    const { face, state } = makeController(silent)
+    face.edit('observeAfterTokens', '5000')
+    face.save()
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(state().failed).toBe(true)
+    expect(state().dirty).toBe(true)
+  })
+
+  it('attempts no writes on a read-only scope', async () => {
+    let writes = 0
+    const scope = fakeScope({})
+    const readOnly: SettingsScopeLike = {
+      ...scope,
+      getSnapshot: () => ({ ...scope.getSnapshot(), writable: false }),
+      set: async () => {
+        writes += 1
+      },
+      unset: async () => {
+        writes += 1
+      },
+    }
+    const { face, state } = makeController(readOnly)
+    face.edit('observeAfterTokens', '5000')
+    face.save()
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(writes).toBe(0)
+    expect(state().dirty).toBe(true)
+    expect(state().failed).toBe(false)
+  })
+
+  it('recovers on a later save after a rejected write', async () => {
+    let failWrites = true
+    const scope = fakeScope({})
+    const flaky: SettingsScopeLike = {
+      ...scope,
+      set: async (field, value) => {
+        if (failWrites) throw new Error('transient storage failure')
+        return scope.set(field, value)
+      },
+    }
+    const { face, state } = makeController(flaky)
+    face.edit('observeAfterTokens', '5000')
+    face.save()
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(state().failed).toBe(true)
+    failWrites = false
+    face.save()
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(state().failed).toBe(false)
+    expect(state().dirty).toBe(false)
+    expect((scope.getSnapshot().user as Record<string, unknown>).observeAfterTokens).toBe(5000)
+  })
+})
+
 describe('OmCardController', () => {
   it('stages edits and reports dirtiness without writing', async () => {
     const { face, state } = makeController(fakeScope({}))
