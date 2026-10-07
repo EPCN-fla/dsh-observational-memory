@@ -117,12 +117,18 @@ export class LedgerStore {
    * in-memory copy keeps the current process consistent.
    */
   async append(sessionId: string, entry: LedgerEntry): Promise<void> {
+    return this.appendAll(sessionId, [entry])
+  }
+
+  /** Append a batch with one cache update and one serialized write. */
+  async appendAll(sessionId: string, batch: readonly LedgerEntry[]): Promise<void> {
+    if (batch.length === 0) return
     const entries = await this.load(sessionId)
     // A first-ever write follows an uncached ENOENT load: install the shared
     // array before pushing so later loads see the in-memory copy.
     if (!this.cache.has(sessionId)) this.cache.set(sessionId, entries)
-    entries.push(entry)
-    const line = `${JSON.stringify(entry)}\n`
+    entries.push(...batch)
+    const line = `${batch.map((entry) => JSON.stringify(entry)).join('\n')}\n`
     const tail = this.tails.get(sessionId) ?? Promise.resolve()
     const next = tail.then(async () => {
       try {

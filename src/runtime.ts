@@ -273,9 +273,9 @@ export class OmRuntime {
       const inherited = entries.filter((entry) =>
         entry.kind === 'visible-memory' ? entry.upToSeq <= boundary : entry.coversUpToSeq <= boundary)
       if (inherited.length > 0) {
-        for (const entry of inherited) {
-          await this._store.append(sessionId, entry)
-        }
+        // One cache update + one write for the whole batch, not one
+        // appendFile per record.
+        await this._store.appendAll(sessionId, inherited)
         this.debug(sessionId, 'ledger.inherited', { from: ancestorId, records: inherited.length, throughSeq: boundary })
         if (this._config.showWorkerNotifications) {
           ctx.logger.info(
