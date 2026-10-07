@@ -358,7 +358,12 @@ export class OmRuntime {
       const message = error instanceof Error ? error.message : String(error)
       if (!viaOverride || !configured || !fallback) return { ok: false, reason: message }
       // A configured override that does not resolve falls back to the
-      // session/default target rather than disabling memory work.
+      // session/default target rather than disabling memory work. Count the
+      // resolution failure toward the suspension streak: without it a
+      // permanently dead override never trips modelFallbackAfterFailures and
+      // the warning below repeats on every pipeline run forever.
+      const consecutiveFailures = (this.workerConsecutiveFailures.get(session.id) ?? 0) + 1
+      this.workerConsecutiveFailures.set(session.id, consecutiveFailures)
       this.onError(
         `observational-memory: configured model ${configured.provider}/${configured.id} is unavailable (${message}); falling back`,
       )
