@@ -102,8 +102,9 @@ export async function maybeLaunchConsolidation(ctx: Context, runtime: OmRuntime,
   if (config.passive) return
   const sessionId: string = session.id
   if (runtime.consolidationInFlight.has(sessionId)) return
-  // Claim the slot synchronously — before the first await — so concurrent
-  // turn/end and agent/created triggers cannot double-run the pipeline.
+  // Claim the slot atomically — no await between the check and the add — so
+  // concurrent turn/end and agent/created triggers cannot double-run the
+  // pipeline. (ensureInherited above already awaited; do not insert one here.)
   runtime.consolidationInFlight.add(sessionId)
   try {
     const entries = await runtime.store.load(sessionId)
