@@ -375,7 +375,18 @@ export class OmCardController {
     const generation = ++this.catalogGeneration
     this.catalogStatus = 'loading'
     this.publish()
-    const result = await this.rpc.call('/api', 'session/modelCatalog', { args: {} })
+    let result: Awaited<ReturnType<CatalogRpcLike['call']>>
+    try {
+      result = await this.rpc.call('/api', 'session/modelCatalog', { args: {} })
+    } catch {
+      // The RPC caller throws on transport failure (only business failures
+      // arrive as {ok:false}). Without this catch the status would freeze at
+      // 'loading' — and the guard above would brick retryCatalog() forever.
+      if (generation !== this.catalogGeneration) return
+      this.catalogStatus = 'error'
+      this.publish()
+      return
+    }
     if (generation !== this.catalogGeneration) return
     if (result.ok) {
       this.catalog = parseModelCatalog(result.value)

@@ -245,6 +245,25 @@ describe('OmCardController model catalog', () => {
     expect(rpc.calls).toBe(2)
     expect(state().catalogStatus).toBe('error')
   })
+
+  it('surfaces a transport-level RPC throw as error instead of freezing at loading', async () => {
+    // The RPC caller throws on transport failure; a frozen 'loading' status
+    // would make retryCatalog() a permanent no-op (the regression).
+    const rpc: CatalogRpcLike & { calls: number } = {
+      calls: 0,
+      call: (() => {
+        rpc.calls += 1
+        return Promise.reject(new Error('connection lost'))
+      }) as CatalogRpcLike['call'],
+    }
+    const { face, state } = makeControllerWithRpc(fakeScope({}), rpc)
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(state().catalogStatus).toBe('error')
+    face.retryCatalog()
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(rpc.calls).toBe(2)
+    expect(state().catalogStatus).toBe('error')
+  })
 })
 
 function makeControllerWithRpc(scope: SettingsScopeLike, rpc: CatalogRpcLike) {
