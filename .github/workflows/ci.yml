@@ -27,12 +27,16 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    strategy:
+      matrix:
+        # engines 声明 ^22.19.0 || >=24：两条腿都跑，防止无意引入 24-only API。
+        node-version: [22, 24]
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: ${{ matrix.node-version }}
           cache: npm
 
       # npm ci 严格按 package-lock.json 安装（含 esbuild 的 postinstall）。
@@ -47,10 +51,23 @@ jobs:
       - name: build
         run: npm run build
 
-      # 打包自检（prepack 会再跑一次 build）：确认 files 覆盖运行时产物，
-      # 不实际发布任何内容。
-      - name: pack dry-run
-        run: npm pack --dry-run
+      # 真实打包并消费产物：安装 tarball 并导入两个入口。dry-run 只列文件，
+      # 抓不住 exports 映射损坏、files 漏收（比如丢 cordis.patch.yml 会让
+      # dsh plugin add 直接失败）或 client 包装器回归。
+      - name: pack and consume the artifact
+        run: |
+          npm pack --silent --pack-destination /tmp
+          mkdir -p /tmp/om-consume && cd /tmp/om-consume
+          npm init -y >/dev/null
+          npm install --no-audit --no-fund /tmp/dsh-observational-memory-*.tgz
+          node -e "import('dsh-observational-memory').then((m) => { if (m.name !== 'observational-memory') throw new Error('host entry name mismatch') })"
+          node -e "
+            const fs = require('fs')
+            const path = require.resolve('dsh-observational-memory/client')
+            const head = fs.readFileSync(path, 'utf8').slice(0, 100)
+            if (!head.startsWith('window.__ModuleLoader__.load({ id: \"dsh-observational-memory\"')) throw new Error('client wrapper missing')
+            console.log('artifact OK:', require('dsh-observational-memory/package.json').version)
+          "
 
   # 发布：仅标签推送；语义门禁全过后才 npm publish。
   publish:
@@ -69,9 +86,10 @@ jobs:
           node-version: 24
           cache: npm
 
-      # Trusted Publishing 需要 npm CLI ≥ 11.5.1；显式升级避免依赖镜像自带的版本。
+      # Trusted Publishing 需要 npm CLI ≥ 11.5.1；钉在 11.x 主线内（不追
+      # latest，避免新版 npm 当天破坏 OIDC 交换）。
       - name: ensure npm CLI with trusted publishing support
-        run: npm install -g npm@latest
+        run: npm install -g npm@^11.5.1
 
       - run: npm ci
 
@@ -94,7 +112,16 @@ jobs:
             echo "prerelease $PKG_VERSION → dist-tag next"
           else
             echo "DIST_TAG=latest" >> "$GITHUB_ENV"
-            LATEST=$(npm view dsh-observational-memory dist-tags.latest 2>/dev/null || true)
+            # fail closed：读不到当前 latest（网络/注册表故障）就拒绝盲发，
+            # 而不是跳过地板检查；仅 E404（包从未发布）视为无地板。
+            LATEST=$(npm view dsh-observational-memory dist-tags.latest 2>&1) || {
+              if echo "$LATEST" | grep -q 'E404'; then
+                LATEST=""
+              else
+                echo "::error::无法读取 npm latest（非 E404），拒绝盲发：$LATEST"
+                exit 1
+              fi
+            }
             if [ -n "$LATEST" ]; then
               npx --yes semver@7 "$PKG_VERSION" -r ">$LATEST" > /dev/null || {
                 echo "::error::$PKG_VERSION 不高于现有 latest ($LATEST)，拒绝让 latest 回退。"

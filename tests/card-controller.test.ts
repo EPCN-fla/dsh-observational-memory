@@ -45,6 +45,85 @@ function makeController(scope: SettingsScopeLike) {
   return { controller, face, state: () => face.hooks.omCard.getSnapshot() }
 }
 
+describe('OmCardController save failure paths', () => {
+  it('keeps drafts and flags the failure when the write rejects', async () => {
+    const scope = fakeScope({})
+    const failing: SettingsScopeLike = {
+      ...scope,
+      set: async () => {
+        throw new Error('profile storage is read-only')
+      },
+    }
+    const { face, state } = makeController(failing)
+    face.edit('observeAfterTokens', '5000')
+    face.save()
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(state().failed).toBe(true)
+    expect(state().saving).toBe(false)
+    expect(state().dirty).toBe(true) // drafts kept for correction
+    expect(state().fields.observeAfterTokens.text).toBe('5000')
+  })
+
+  it('flags the failure when the user layer silently refuses the write', async () => {
+    const scope = fakeScope({})
+    const silent: SettingsScopeLike = {
+      ...scope,
+      set: async () => {}, // resolves but never lands
+    }
+    const { face, state } = makeController(silent)
+    face.edit('observeAfterTokens', '5000')
+    face.save()
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(state().failed).toBe(true)
+    expect(state().dirty).toBe(true)
+  })
+
+  it('attempts no writes on a read-only scope', async () => {
+    let writes = 0
+    const scope = fakeScope({})
+    const readOnly: SettingsScopeLike = {
+      ...scope,
+      getSnapshot: () => ({ ...scope.getSnapshot(), writable: false }),
+      set: async () => {
+        writes += 1
+      },
+      unset: async () => {
+        writes += 1
+      },
+    }
+    const { face, state } = makeController(readOnly)
+    face.edit('observeAfterTokens', '5000')
+    face.save()
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(writes).toBe(0)
+    expect(state().dirty).toBe(true)
+    expect(state().failed).toBe(false)
+  })
+
+  it('recovers on a later save after a rejected write', async () => {
+    let failWrites = true
+    const scope = fakeScope({})
+    const flaky: SettingsScopeLike = {
+      ...scope,
+      set: async (field, value) => {
+        if (failWrites) throw new Error('transient storage failure')
+        return scope.set(field, value)
+      },
+    }
+    const { face, state } = makeController(flaky)
+    face.edit('observeAfterTokens', '5000')
+    face.save()
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(state().failed).toBe(true)
+    failWrites = false
+    face.save()
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(state().failed).toBe(false)
+    expect(state().dirty).toBe(false)
+    expect((scope.getSnapshot().user as Record<string, unknown>).observeAfterTokens).toBe(5000)
+  })
+})
+
 describe('OmCardController', () => {
   it('stages edits and reports dirtiness without writing', async () => {
     const { face, state } = makeController(fakeScope({}))
@@ -75,6 +154,21 @@ describe('OmCardController', () => {
     expect(state().dirty).toBe(false)
     expect(state().failed).toBe(false)
     expect(scope.getSnapshot().user as Record<string, unknown>).toMatchObject({ observeAfterTokens: 5000, passive: true })
+  })
+
+  it('converges when every staged draft is a no-op', async () => {
+    // Retyping the effective value (or resetting a non-overridden field)
+    // stages a draft that produces zero writes; the save must still clear
+    // the staging instead of leaving the dirty badge up forever.
+    const scope = fakeScope({ user: { observeAfterTokens: 5000 } })
+    const { face, state } = makeController(scope)
+    face.edit('observeAfterTokens', '5000')
+    expect(state().dirty).toBe(true)
+    face.save()
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(state().dirty).toBe(false)
+    expect(state().failed).toBe(false)
+    expect((scope.getSnapshot().user as Record<string, unknown>).observeAfterTokens).toBe(5000)
   })
 
   it('writes the model override as one object and clears it when blanked', async () => {
@@ -237,6 +331,25 @@ describe('OmCardController model catalog', () => {
 
   it('reports an error and recovers on retry', async () => {
     const rpc = fakeCatalogRpc({ ok: false })
+    const { face, state } = makeControllerWithRpc(fakeScope({}), rpc)
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(state().catalogStatus).toBe('error')
+    face.retryCatalog()
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(rpc.calls).toBe(2)
+    expect(state().catalogStatus).toBe('error')
+  })
+
+  it('surfaces a transport-level RPC throw as error instead of freezing at loading', async () => {
+    // The RPC caller throws on transport failure; a frozen 'loading' status
+    // would make retryCatalog() a permanent no-op (the regression).
+    const rpc: CatalogRpcLike & { calls: number } = {
+      calls: 0,
+      call: (() => {
+        rpc.calls += 1
+        return Promise.reject(new Error('connection lost'))
+      }) as CatalogRpcLike['call'],
+    }
     const { face, state } = makeControllerWithRpc(fakeScope({}), rpc)
     await new Promise((resolve) => setTimeout(resolve, 10))
     expect(state().catalogStatus).toBe('error')

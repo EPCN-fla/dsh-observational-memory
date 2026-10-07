@@ -9,8 +9,9 @@
  *
  * Configuration lives in the `observational-memory` settings namespace
  * (Settings → Plugins → Plugin configuration), layered over the cordis
- * composition entry; the harness's own configuration is never touched. Two
- * host generations are served from one apply: DSH ≤0.1.5 edits the namespace
+ * composition entry; the harness's own configuration is never touched. Three
+ * host windows (0.1.5 / 0.1.7 / 0.2.0 prerelease lines) are served from one
+ * apply through two integration paths: DSH ≤0.1.5 edits the namespace
  * through the legacy settings section (`installSection`), DSH ≥0.1.7 edits
  * the profile-owned live configuration (volatile Config fields persisted in
  * the profile's cordis.patch.yml).
@@ -74,7 +75,14 @@ export function apply(ctx: Context, config: Config): void {
           source = current
         },
         onChange: () => {
-          runtime.setConfig(source())
+          // Same guard as refreshConfig: a schema-invalid edit must not
+          // throw into the host's settings dispatch — keep the last good
+          // epoch and log the rejection instead.
+          try {
+            runtime.setConfig(source())
+          } catch (error) {
+            ctx.logger.warn(`[observational-memory] rejected an invalid settings edit; keeping the previous values: ${error instanceof Error ? error.message : String(error)}`)
+          }
         },
       })
       return

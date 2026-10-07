@@ -12,12 +12,13 @@
  */
 import { readFile } from 'node:fs/promises'
 import { basename } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { build } from 'esbuild'
 import { transform } from 'lightningcss'
 
 const ID = 'dsh-observational-memory'
 
-const PLATFORM_EXTERNALS = [
+export const PLATFORM_EXTERNALS = [
   'react',
   'react/jsx-runtime',
   'react-dom',
@@ -31,6 +32,33 @@ const PLATFORM_EXTERNALS = [
 
 /** Host-half externals: harness runtime packages resolved from the profile. */
 const HOST_EXTERNALS = ['@deepseek-ai/*']
+
+/**
+ * Bundle-purity gate (the client half's mirror of the official
+ * dsh-client-bundle-purity check): a bare import outside the platform's
+ * shared module table would be inlined as a private duplicate of a module
+ * the host shares by identity — the artifact loads, then misbehaves at
+ * runtime with no build-time signal. Global (non-module) CSS has no served
+ * artifact either: the host serves only client.js.
+ */
+export const bundlePurityPlugin = {
+  name: 'dsh-bundle-purity',
+  setup(pluginBuild) {
+    pluginBuild.onResolve({ filter: /^[^./]/ }, (args) => {
+      if (args.kind === 'entry-point') return null
+      const external = PLATFORM_EXTERNALS.some((ext) => args.path === ext || args.path.startsWith(`${ext}/`))
+      if (external) return null
+      throw new Error(
+        `[bundle-purity] client import "${args.path}" is not in the platform external table`
+        + (args.importer ? ` (imported from ${args.importer})` : ''),
+      )
+    })
+    pluginBuild.onResolve({ filter: /\.css$/ }, (args) => {
+      if (args.path.endsWith('.module.css')) return null
+      throw new Error(`[bundle-purity] global CSS "${args.path}" has no served artifact; use a .module.css sheet`)
+    })
+  },
+}
 
 /**
  * CSS Modules the way the DSH client bundles them: lightningcss compiles and
@@ -76,39 +104,45 @@ const cssModulesPlugin = {
   },
 }
 
-// Host half: bundled ESM for Node; harness runtime dependencies stay external.
-await build({
-  entryPoints: ['src/index.ts'],
-  bundle: true,
-  format: 'esm',
-  platform: 'node',
-  target: 'es2024',
-  outfile: 'lib/index.js',
-  sourcemap: true,
-  external: HOST_EXTERNALS,
-  logLevel: 'info',
-})
+// Run the builds only when invoked as a script (`node build.mjs`); importing
+// the module (e.g. from tests) exposes the plugins without side effects.
+const isMain = process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href
 
-// Browser half: lazy-CJS factory artifact.
-await build({
-  entryPoints: ['src/client/index.tsx'],
-  bundle: true,
-  format: 'cjs',
-  platform: 'browser',
-  target: 'es2024',
-  outfile: 'lib/client.js',
-  sourcemap: true,
-  jsx: 'automatic',
-  external: PLATFORM_EXTERNALS,
-  plugins: [cssModulesPlugin],
-  define: {
-    'process.env.NODE_ENV': JSON.stringify('production'),
-  },
-  banner: {
-    js: `window.__ModuleLoader__.load({ id: ${JSON.stringify(ID)}, factory: (require) => {\nvar module = { exports: {} };\nvar exports = module.exports;`,
-  },
-  footer: {
-    js: 'return module.exports; } });',
-  },
-  logLevel: 'info',
-})
+if (isMain) {
+  // Host half: bundled ESM for Node; harness runtime dependencies stay external.
+  await build({
+    entryPoints: ['src/index.ts'],
+    bundle: true,
+    format: 'esm',
+    platform: 'node',
+    target: 'es2024',
+    outfile: 'lib/index.js',
+    sourcemap: true,
+    external: HOST_EXTERNALS,
+    logLevel: 'info',
+  })
+
+  // Browser half: lazy-CJS factory artifact.
+  await build({
+    entryPoints: ['src/client/index.tsx'],
+    bundle: true,
+    format: 'cjs',
+    platform: 'browser',
+    target: 'es2024',
+    outfile: 'lib/client.js',
+    sourcemap: true,
+    jsx: 'automatic',
+    external: PLATFORM_EXTERNALS,
+    plugins: [cssModulesPlugin, bundlePurityPlugin],
+    define: {
+      'process.env.NODE_ENV': JSON.stringify('production'),
+    },
+    banner: {
+      js: `window.__ModuleLoader__.load({ id: ${JSON.stringify(ID)}, factory: (require) => {\nvar module = { exports: {} };\nvar exports = module.exports;`,
+    },
+    footer: {
+      js: 'return module.exports; } });',
+    },
+    logLevel: 'info',
+  })
+}

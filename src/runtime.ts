@@ -73,6 +73,13 @@ export class OmRuntime {
   readonly overrideSuspensionNotified = new Set<string>()
   /** Consecutive deliberate-empty observer verdicts per session (warns from the 2nd on). */
   readonly observerConsecutiveEmpties = new Map<string, number>()
+  /**
+   * Context-window lookups per route. The host re-calls the adapter on every
+   * resolveModelInfo, and ratio mode resolves on every idle event and status
+   * poll; route windows are static for the adapter's lifetime, so cache both
+   * hits and (as undefined) unresolvable routes.
+   */
+  private readonly contextWindowCache = new Map<string, number | undefined>()
 
   constructor(initialConfig: Config, hooks: { onError: (message: string) => void }) {
     this._config = resolveConfig(initialConfig)
@@ -266,9 +273,9 @@ export class OmRuntime {
       const inherited = entries.filter((entry) =>
         entry.kind === 'visible-memory' ? entry.upToSeq <= boundary : entry.coversUpToSeq <= boundary)
       if (inherited.length > 0) {
-        for (const entry of inherited) {
-          await this._store.append(sessionId, entry)
-        }
+        // One cache update + one write for the whole batch, not one
+        // appendFile per record.
+        await this._store.appendAll(sessionId, inherited)
         this.debug(sessionId, 'ledger.inherited', { from: ancestorId, records: inherited.length, throughSeq: boundary })
         if (this._config.showWorkerNotifications) {
           ctx.logger.info(
@@ -298,12 +305,17 @@ export class OmRuntime {
           ? { provider: agent.options.provider, model: agent.options.model }
           : defaultSelection(ctx)
     if (!target) return undefined
+    const key = `${target.provider}/${target.model}`
+    if (this.contextWindowCache.has(key)) return this.contextWindowCache.get(key)
+    let window: number | undefined
     try {
       const info = await ctx.llm.resolveModelInfo(target.provider, target.model)
-      return info.context?.contextWindow
+      window = info.context?.contextWindow
     } catch {
-      return undefined
+      window = undefined
     }
+    this.contextWindowCache.set(key, window)
+    return window
   }
 
   /**
@@ -358,7 +370,12 @@ export class OmRuntime {
       const message = error instanceof Error ? error.message : String(error)
       if (!viaOverride || !configured || !fallback) return { ok: false, reason: message }
       // A configured override that does not resolve falls back to the
-      // session/default target rather than disabling memory work.
+      // session/default target rather than disabling memory work. Count the
+      // resolution failure toward the suspension streak: without it a
+      // permanently dead override never trips modelFallbackAfterFailures and
+      // the warning below repeats on every pipeline run forever.
+      const consecutiveFailures = (this.workerConsecutiveFailures.get(session.id) ?? 0) + 1
+      this.workerConsecutiveFailures.set(session.id, consecutiveFailures)
       this.onError(
         `observational-memory: configured model ${configured.provider}/${configured.id} is unavailable (${message}); falling back`,
       )

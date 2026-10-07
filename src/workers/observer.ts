@@ -102,6 +102,19 @@ function joinOrEmpty(items: string[]): string {
   return items.length ? items.join('\n') : '(none yet)'
 }
 
+/**
+ * Observation content must stay single-line: it is rendered verbatim into
+ * the memory summary block fed to the session model, and embedded newlines
+ * could mimic that block's structure (fake section headers, forged [id]
+ * lines). Mirrors the reflector's rejection.
+ */
+function normalizeObservationContent(content: unknown): string | undefined {
+  if (typeof content !== 'string') return undefined
+  const normalized = truncateRecordContent(content.trim())
+  if (!normalized || /\r|\n/.test(normalized)) return undefined
+  return normalized
+}
+
 export async function runObserver(ctx: Context, options: RunObserverOptions): Promise<Observation[] | undefined> {
   const conversation = options.chunk.trim()
   if (!conversation) return undefined
@@ -127,7 +140,7 @@ export async function runObserver(ctx: Context, options: RunObserverOptions): Pr
           proposal.sourceEventSeqs as unknown[] | undefined,
           options.allowedSourceEventSeqs,
         )
-        const content = typeof proposal.content === 'string' ? truncateRecordContent(proposal.content) : undefined
+        const content = normalizeObservationContent(proposal.content)
         const timestamp = typeof proposal.timestamp === 'string' ? proposal.timestamp : undefined
         const relevance: Relevance | undefined = isRelevance(proposal.relevance) ? proposal.relevance : undefined
         if (!sourceEventSeqs || !content || !timestamp || !relevance) {

@@ -28,26 +28,25 @@ interface NumberFieldDef {
   key: string
   labelKey: LocaleKey
   hintKey: LocaleKey
-  min?: number
 }
 
 /** Number fields rendered above the compaction-threshold mode switch. */
 const TOP_NUMBER_FIELDS: NumberFieldDef[] = [
-  { key: 'observeAfterTokens', labelKey: 'field.observeAfterTokens', hintKey: 'field.observeAfterTokensHint', min: 1 },
-  { key: 'reflectAfterTokens', labelKey: 'field.reflectAfterTokens', hintKey: 'field.reflectAfterTokensHint', min: 1 },
-  { key: 'observerChunkMaxTokens', labelKey: 'field.observerChunkMaxTokens', hintKey: 'field.observerChunkMaxTokensHint', min: 256 },
+  { key: 'observeAfterTokens', labelKey: 'field.observeAfterTokens', hintKey: 'field.observeAfterTokensHint' },
+  { key: 'reflectAfterTokens', labelKey: 'field.reflectAfterTokens', hintKey: 'field.reflectAfterTokensHint' },
+  { key: 'observerChunkMaxTokens', labelKey: 'field.observerChunkMaxTokens', hintKey: 'field.observerChunkMaxTokensHint' },
 ]
 
 /** Number fields rendered below the mode-dependent compaction threshold. */
 const BOTTOM_NUMBER_FIELDS: NumberFieldDef[] = [
-  { key: 'observationsPoolMaxTokens', labelKey: 'field.observationsPoolMaxTokens', hintKey: 'field.observationsPoolMaxTokensHint', min: 1 },
-  { key: 'observationsPoolTargetTokens', labelKey: 'field.observationsPoolTargetTokens', hintKey: 'field.observationsPoolTargetTokensHint', min: 1 },
-  { key: 'agentMaxTurns', labelKey: 'field.agentMaxTurns', hintKey: 'field.agentMaxTurnsHint', min: 1 },
+  { key: 'observationsPoolMaxTokens', labelKey: 'field.observationsPoolMaxTokens', hintKey: 'field.observationsPoolMaxTokensHint' },
+  { key: 'observationsPoolTargetTokens', labelKey: 'field.observationsPoolTargetTokens', hintKey: 'field.observationsPoolTargetTokensHint' },
+  { key: 'agentMaxTurns', labelKey: 'field.agentMaxTurns', hintKey: 'field.agentMaxTurnsHint' },
 ]
 
 /** The threshold field each compaction-threshold mode shows; the other is inert. */
 const MODE_THRESHOLD_FIELD: Record<string, NumberFieldDef> = {
-  calibrated: { key: 'compactAfterTokens', labelKey: 'field.compactAfterTokens', hintKey: 'field.compactAfterTokensHint', min: 0 },
+  calibrated: { key: 'compactAfterTokens', labelKey: 'field.compactAfterTokens', hintKey: 'field.compactAfterTokensHint' },
   ratio: { key: 'compactAfterTokensRatio', labelKey: 'field.compactAfterTokensRatio', hintKey: 'field.compactAfterTokensRatioHint' },
 }
 
@@ -256,7 +255,10 @@ export function ObservationalMemoryCard(props: ObservationalMemoryCardProps) {
 
   if (!state.available) return null
 
-  const disabled = !state.writable
+  // Inputs stay locked while a save is in flight: the successful save clears
+  // the staged drafts, and anything typed into an enabled field mid-flight
+  // would be silently wiped with them.
+  const disabled = !state.writable || state.saving
   const modelInvalid =
     (state.fields['model.provider']?.text.trim() === '') !== (state.fields['model.id']?.text.trim() === '')
   const blocked = !state.dirty || state.invalid || state.saving || modelInvalid
@@ -402,7 +404,6 @@ export function ObservationalMemoryCard(props: ObservationalMemoryCardProps) {
             key: 'modelFallbackAfterFailures',
             labelKey: 'field.modelFallbackAfterFailures',
             hintKey: 'field.modelFallbackAfterFailuresHint',
-            min: 0,
           })}
 
           <h4 className={css.section}>{t('section.advanced')}</h4>

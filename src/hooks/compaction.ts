@@ -65,6 +65,9 @@ function compactionCutSeq(session: Session, messages: readonly { id?: string | u
 export function registerCompactionHook(ctx: Context, runtime: OmRuntime): void {
   /** sessionId → rendered memory awaiting its compaction's durable commit. */
   const pending = new Map<string, PendingVisible>()
+  // A compaction aborted between the summarization call and its end event
+  // leaves its entry parked until the next render overwrites it or the
+  // session disposes — bounded to one entry per session by design.
 
   // The summarization call runs between `compaction/start` and
   // `compaction/summary`; the waterfall sees it by its `purpose` marker.

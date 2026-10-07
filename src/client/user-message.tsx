@@ -20,7 +20,7 @@ import {
   writeClipboard,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { LocaleKey } from './locales.ts'
-import { findRollbackAnchor, hasAttachments, type RollbackEventView } from './rollback.ts'
+import { findRollbackAnchor, hasAttachments, userTextOf, type RollbackEventView } from './rollback.ts'
 import css from './user-message.module.css'
 
 // DSH 0.1.7 renamed the pixel-suffixed product icons to weight names
@@ -160,17 +160,18 @@ function contentParts(content: readonly unknown[]): {
   attachments: PresentedAttachment[]
   rest: unknown[]
 } {
-  const texts: string[] = []
   const attachments: PresentedAttachment[] = []
   const rest: unknown[] = []
   for (const block of content) {
     const b = block as { type?: string; text?: string; attachment?: unknown }
-    if (b.type === 'text' && typeof b.text === 'string') texts.push(b.text)
-    else if (b.type === 'image' && b.attachment !== undefined) attachments.push({ type: 'image', image: { attachment: b.attachment } })
+    // Text blocks are joined once by userTextOf below (single join source —
+    // duplicating it here drifted the rollback draft away from the copy action).
+    if (b.type === 'text' && typeof b.text === 'string') continue
+    if (b.type === 'image' && b.attachment !== undefined) attachments.push({ type: 'image', image: { attachment: b.attachment } })
     else if (b.type === 'file' && b.attachment !== undefined) attachments.push({ type: 'file', file: b.attachment as PresentedFile })
     else rest.push(block)
   }
-  return { text: texts.join(''), attachments, rest }
+  return { text: userTextOf(content), attachments, rest }
 }
 
 // ---------------------------------------------------------------------------
