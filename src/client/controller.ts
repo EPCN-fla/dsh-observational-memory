@@ -545,7 +545,14 @@ export class OmCardController {
       }
     }
 
-    if (writes.length === 0 && clears.length === 0) return
+    if (writes.length === 0 && clears.length === 0) {
+      // Every staged draft turned out a valid no-op (an unchanged value, or
+      // a reset of a field that has no user-layer entry): converge — clear
+      // the drafts instead of leaving the unsaved badge up with a dead save.
+      this.staged.clear()
+      this.publish()
+      return
+    }
 
     this.saving = true
     this.failed = false

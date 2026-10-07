@@ -77,6 +77,21 @@ describe('OmCardController', () => {
     expect(scope.getSnapshot().user as Record<string, unknown>).toMatchObject({ observeAfterTokens: 5000, passive: true })
   })
 
+  it('converges when every staged draft is a no-op', async () => {
+    // Retyping the effective value (or resetting a non-overridden field)
+    // stages a draft that produces zero writes; the save must still clear
+    // the staging instead of leaving the dirty badge up forever.
+    const scope = fakeScope({ user: { observeAfterTokens: 5000 } })
+    const { face, state } = makeController(scope)
+    face.edit('observeAfterTokens', '5000')
+    expect(state().dirty).toBe(true)
+    face.save()
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(state().dirty).toBe(false)
+    expect(state().failed).toBe(false)
+    expect((scope.getSnapshot().user as Record<string, unknown>).observeAfterTokens).toBe(5000)
+  })
+
   it('writes the model override as one object and clears it when blanked', async () => {
     const scope = fakeScope({})
     const { face, state } = makeController(scope)
