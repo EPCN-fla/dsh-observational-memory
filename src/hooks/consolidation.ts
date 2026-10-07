@@ -116,7 +116,27 @@ export async function maybeLaunchConsolidation(ctx: Context, runtime: OmRuntime,
     await runConsolidationPipeline(ctx, runtime, session)
   } finally {
     runtime.consolidationInFlight.delete(sessionId)
+    releaseDisposedSession(ctx, runtime, session)
   }
+}
+
+/**
+ * A pipeline that outlived its session re-caches the dead session's ledger
+ * (a late store.append re-reads from disk) and repopulates the per-session
+ * runtime maps after session/disposed cleared them. When the session is no
+ * longer attached by the time the run settles, release both again. The
+ * on-disk ledger is durable and unaffected.
+ */
+function releaseDisposedSession(ctx: Context, runtime: OmRuntime, session: Session): void {
+  const sessions = ctx.sessions as { get(id: string): unknown } | undefined
+  // No registry to judge disposal against (exotic composition): leave the
+  // entries to the session/disposed path rather than guessing.
+  if (sessions === undefined) return
+  if (sessions.get(session.id) !== undefined) return
+  void runtime.store.flush().then(() => {
+    runtime.store.evict(session.id)
+    runtime.clearSession(session.id)
+  })
 }
 
 /**
@@ -143,6 +163,7 @@ export async function runConsolidationNow(ctx: Context, runtime: OmRuntime, sess
     return true
   } finally {
     runtime.consolidationInFlight.delete(sessionId)
+    releaseDisposedSession(ctx, runtime, session)
   }
 }
 
