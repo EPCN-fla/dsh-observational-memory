@@ -256,7 +256,10 @@ export function ObservationalMemoryCard(props: ObservationalMemoryCardProps) {
 
   if (!state.available) return null
 
-  const disabled = !state.writable
+  // Inputs stay locked while a save is in flight: the successful save clears
+  // the staged drafts, and anything typed into an enabled field mid-flight
+  // would be silently wiped with them.
+  const disabled = !state.writable || state.saving
   const modelInvalid =
     (state.fields['model.provider']?.text.trim() === '') !== (state.fields['model.id']?.text.trim() === '')
   const blocked = !state.dirty || state.invalid || state.saving || modelInvalid
