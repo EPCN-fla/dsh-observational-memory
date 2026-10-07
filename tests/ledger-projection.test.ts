@@ -84,6 +84,17 @@ describe('buildCompactionProjection', () => {
     expect(projection.reflections).toEqual([REFLECTED])
     expect(projection.observations).toEqual([]) // drop applied
   })
+
+  it('before the first full fold, a normal-budget compaction shows observations only', () => {
+    // The most common first-compaction path: with no visible-memory record
+    // yet, the reflection/drop boundary is NONE — reflections recorded so
+    // far stay out of the summary, and the recorded drop is not applied
+    // either (OBSERVED survives), until a full fold crystallizes them.
+    const projection = buildCompactionProjection(baseEntries(), 10, { observationsPoolMaxTokens: 1000 })
+    expect(projection.fullFold).toBe(false)
+    expect(projection.observations).toEqual([OBSERVED])
+    expect(projection.reflections).toEqual([])
+  })
 })
 
 describe('latestFullFoldSeq / diffProjection', () => {
