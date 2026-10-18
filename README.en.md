@@ -109,7 +109,7 @@ Restart DSH Web afterwards. Verify the mount: `dsh --profile web --dump-config |
 
 ### The settings card
 
-Open **Settings → Plugins** and select **dsh-observational-memory** to reach its package page; edit the **Observational Memory** configuration card there — edits apply live on **Save**, no restart. The card is bilingual (中文/English) and follows the DSH language setting.
+Open **Settings → Plugins** and select **dsh-observational-memory** to reach its package page; edit the **Observational Memory** configuration card there — edits apply live on **Save**, no restart. (On 0.1.5 hosts the card lives under Settings → Plugins → Plugin configuration instead.) The card is bilingual (中文/English) and follows the DSH language setting.
 
 - **Thresholds**: the compaction-threshold mode decides which single threshold parameter is shown — `calibrated` shows the static threshold, `ratio` shows the window ratio. Only the shown parameter is effective; the hidden one is inert however it is set.
 - **Model (optional)**: cascading provider → model ID → reasoning-effort dropdowns fed by the models added to DSH; a downstream dropdown stays empty until its upstream pick is made. Leave everything blank to let memory workers follow the session model.

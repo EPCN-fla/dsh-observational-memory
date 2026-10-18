@@ -109,7 +109,7 @@ dsh plugin --profile web add /absolute/path/to/dsh-observational-memory
 
 ### 设置卡片
 
-打开 **设置 → 插件**，点击 **dsh-observational-memory** 进入包详情页，在 **Observational Memory** 配置卡中编辑，**保存**即时生效（无需重启）。卡片支持中/英双语，跟随 DSH 的语言设置。
+打开 **设置 → 插件**，点击 **dsh-observational-memory** 进入包详情页，在 **Observational Memory** 配置卡中编辑，**保存**即时生效（无需重启）。（0.1.5 宿主机型：卡片位于「设置 → 插件 → 插件配置」选项卡。）卡片支持中/英双语，跟随 DSH 的语言设置。
 
 - **阈值区**：「压缩阈值模式」决定只显示哪个阈值参数——`calibrated` 显示「主动压缩阈值」，`ratio` 显示「压缩阈值比例」；只有显示的参数有效，隐藏的参数无论设成多少都不生效。
 - **模型（可选）区**：「提供商 → 模型 ID → 推理强度」三级下拉，选项来自 DSH 已添加的模型列表；前者未选择时后者的下拉框为空。全部留空则记忆 worker 跟随会话当前模型。

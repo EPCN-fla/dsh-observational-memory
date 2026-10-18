@@ -1,7 +1,9 @@
 /**
- * The Observational Memory settings card: one expandable card at the bottom
- * of Settings → Plugins → Plugin configuration. Owns its chrome and controls
- * (the bundle-purity gate forbids importing the shipped cards' components).
+ * The Observational Memory settings card: the configuration form on this
+ * package's Plugins-page detail view (DSH ≥0.1.7), or one expandable card
+ * under Settings → Plugins → Plugin configuration on DSH 0.1.5. Owns its
+ * chrome and controls (the bundle-purity gate forbids importing the shipped
+ * cards' components).
  */
 import { useEffect, useRef, useState } from 'react'
 import type { LocaleKey } from './locales.ts'
