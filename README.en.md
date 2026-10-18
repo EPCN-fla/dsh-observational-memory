@@ -57,10 +57,11 @@ Differences from the Pi version (platform adaptations):
 
 ## Install
 
-Requires a deepseek-harness **0.1.5 prerelease (≥ rc.2), 0.1.7 prerelease (≥ rc.1), or 0.2.0 prerelease (≥ rc.1)** — prerelease lines only; the finals (0.1.7, 0.2.0) stay refused until each line is verified and consciously admitted.
+The correspondence matrix between plugin versions and DSH versions is as follows:
 
 | Plugin version | Compatible DSH versions (peer-range semantics) |
 | --- | --- |
+| 0.3.1 | 0.1.5-rc.2 ~ <0.1.5, 0.1.7-rc.1 ~ <0.1.7, 0.2.0-rc.1 ~ <0.2.0, 0.2.1-rc.1 ~ <0.2.1 |
 | 0.3.0 | 0.1.5-rc.2 ~ <0.1.5, 0.1.7-rc.1 ~ <0.1.7, 0.2.0-rc.1 ~ <0.2.0 |
 | 0.2.0 | 0.1.5-rc.2 ~ <0.1.5, 0.1.7-rc.1 |
 | 0.1.4 | ≥0.1.5-rc.2 |
