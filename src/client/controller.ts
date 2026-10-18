@@ -33,9 +33,11 @@ export interface SettingsScopeLike {
  * declared locally because the client type surface is not shared across host
  * generations. Snapshot fields are a structural superset of the legacy
  * settings scope's; writes resolve whether the Host accepted them.
+ * (The snapshot's `mode: 'host' | 'memory'` marker retired in DSH 0.2.1 with
+ * the memory-persistence experiment; this face never read it.)
  */
 export interface ConfigFormLike {
-  getSnapshot(): ReturnType<SettingsScopeLike['getSnapshot']> & { mode: 'host' | 'memory' }
+  getSnapshot(): ReturnType<SettingsScopeLike['getSnapshot']>
   subscribe(listener: () => void): () => void
   set(field: string, value: unknown): Promise<boolean>
   unset(field: string): Promise<boolean>

@@ -84,4 +84,85 @@ describe('OmUserMessageNodeView', () => {
     const html = render({ n: node({ content: [{ type: 'image', attachment: { ref: 'a' } }] }) })
     expect(html).toContain('data-unavailable')
   })
+
+  it('delegates the content stack to the user-content factory on DSH ≥0.2.1', () => {
+    // 0.2.1 owner share: renderMessageImages/openSkill are gone; the PropsRenderFactories
+    // pair and loadImage arrive instead, and the shipped bubble delegates to the
+    // conversation.chat.user.content factory. The replacement must mirror that call.
+    const calls: { name: string; props: Record<string, unknown> }[] = []
+    const html = renderToStaticMarkup(
+      createElement(OmUserMessageNodeView, {
+        node: {
+          ...node({ content: [{ type: 'text', text: 'remember the codename' }] }),
+          data: {
+            seq: 11,
+            time: Date.parse('2026-01-15T14:30:00'),
+            content: [{ type: 'text', text: 'remember the codename' }],
+            referenceLabels: ['earlier-session'],
+            skillNames: ['deep-research'],
+          },
+        },
+        openFile: () => {},
+        loadImage: async () => undefined,
+        renderSlot: () => null,
+        renderFactorySlot: (name: string, props: Record<string, unknown>) => {
+          calls.push({ name, props })
+          return createElement('div', { 'data-factory': name })
+        },
+        t: (key: string) => (en as Record<string, string>)[key] ?? key,
+        rollbackWindow: () => ({ entries: [{ seq: 3, type: 'turn/end' }], hasMore: false }),
+        rollback: () => {},
+        notifyRollbackBlocked: () => {},
+      } as never),
+    )
+    expect(calls.map((call) => call.name)).toEqual(['conversation.chat.user.content'])
+    const forwarded = calls[0]!.props as {
+      content: { text: string; referenceLabels?: readonly string[] }
+      facts: { sessionLabels?: readonly string[]; skillNames?: readonly string[] }
+      interactive: boolean
+    }
+    expect(forwarded.content.text).toBe('remember the codename')
+    expect(forwarded.content.referenceLabels).toEqual(['earlier-session'])
+    expect(forwarded.facts.sessionLabels).toEqual(['earlier-session'])
+    expect(forwarded.facts.skillNames).toEqual(['deep-research'])
+    expect(forwarded.interactive).toBe(true)
+    // The rollback action row stays this plugin's own on every generation.
+    expect(html).toContain('Rollback')
+  })
+
+  it('renders plain text when the host serves neither projection nor render factories', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.resetModules()
+    vi.doMock('@deepseek-ai/dsh-client-ui-primitives', () => ({
+      fileExtension: (name: string) => name.split('.').at(-1) ?? '',
+      FileTypeIcon: () => null,
+      fileSizeText: (bytes: number) => `${bytes} B`,
+      IconCheckOutlineRegular: () => createElement('span', { 'data-icon': 'check' }),
+      IconCopyOutlineRegular: () => createElement('span', { 'data-icon': 'copy' }),
+      JsonBlock: () => null,
+      // Undefined binding = absent from the host's module table (the vitest
+      // mock guard refuses a truly missing property). The owner props below
+      // carry no render factories either.
+      projectUserText: undefined,
+      Tooltip: (props: { children?: ReactNode }) => createElement('span', {}, props.children),
+      writeClipboard: async () => true,
+    }))
+    const { OmUserMessageNodeView: FreshView } = await import('../src/client/user-message.tsx')
+    const html = renderToStaticMarkup(
+      createElement(FreshView, {
+        node: node(),
+        renderMessageImages: () => null,
+        openFile: () => {},
+        openSkill: () => {},
+        t: (key: string) => (en as Record<string, string>)[key] ?? key,
+        rollbackWindow: () => ({ entries: [{ seq: 3, type: 'turn/end' }], hasMore: false }),
+        rollback: () => {},
+        notifyRollbackBlocked: () => {},
+      } as never),
+    )
+    expect(html).toContain('remember the codename')
+    expect(html).toContain('Rollback')
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('projectUserText'))
+    warn.mockRestore()
+  })
 })

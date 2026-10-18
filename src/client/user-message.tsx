@@ -15,7 +15,6 @@ import {
   FileTypeIcon,
   fileSizeText,
   JsonBlock,
-  projectUserText,
   Tooltip,
   writeClipboard,
 } from '@deepseek-ai/dsh-client-ui-primitives'
@@ -43,8 +42,11 @@ export type UserMessageTranslate = (key: LocaleKey, params?: Record<string, stri
 
 // The 0.1.7 built-in bubble passes chip actions (openFile/openSkill) as
 // projectUserText's optional fifth argument; 0.1.5's host-served copy takes
-// only four parameters and ignores the extra argument at runtime. The alias
-// keeps the call typechecking against both generations' declarations.
+// only four parameters and ignores the extra argument at runtime. DSH 0.2.1
+// removes the export altogether (the user-text pipeline moved behind the
+// `conversation.user.text` render factory), so the function is resolved off
+// the platform module table — a missing binding renders the text plain
+// instead of taking every user node down with a TypeError.
 type ProjectUserText = (
   text: string,
   sessionLabels: readonly string[],
@@ -52,7 +54,8 @@ type ProjectUserText = (
   slashKind: 'skill' | 'command',
   references?: { openFile: (path: string) => void; openSkill: (name: string) => void } | undefined,
 ) => ReactNode
-const projectUserTextWithRefs = projectUserText as ProjectUserText
+const projectUserTextWithRefs = (primitives as unknown as { projectUserText?: ProjectUserText }).projectUserText
+let warnedMissingProjection = false
 
 /** The node payload shape this renderer consumes (mirrors UserMessageNode). */
 export interface UserMessageNodeLike {
@@ -67,16 +70,27 @@ export interface UserMessageNodeLike {
  *  Note: the 0.1.7 owner additions groupPart/openSkill are assistant-node
  *  concerns (reasoning/response grouping) or chip actions; a user/steering
  *  bubble legitimately never sees groupPart, and openSkill may be absent on
- *  0.1.5 — the references pass-through below gates on it. */
+ *  0.1.5 — the references pass-through below gates on it. DSH 0.2.1 drops
+ *  `renderMessageImages`/`openSkill` from the owner share and adds the
+ *  PropsRenderFactories pair (`renderSlot`/`renderFactorySlot`) plus
+ *  `loadImage`; each side's fields stay optional here so one component body
+ *  serves every supported generation. */
 export interface UserMessageOwnerLike {
   node: {
     anchorSeq: number
     location: { kind: string; turn?: { turn: number } }
     data: UserMessageNodeLike
   }
-  renderMessageImages: (options: { images: { attachment: unknown }[]; align: 'end'; compact: boolean }) => ReactNode
+  /** ≤0.2.0: owner-composed image renderer. */
+  renderMessageImages?: (options: { images: { attachment: unknown }[]; align: 'end'; compact: boolean }) => ReactNode
   openFile: (path: string) => void
   openSkill?: ((name: string) => void) | undefined
+  /** ≥0.2.1: session-authorized image loader handed to the images render slot. */
+  loadImage?: unknown
+  /** ≥0.2.1: PropsRenderFactories — the `conversation.chat.user.images` seat. */
+  renderSlot?: (name: string, props: Record<string, unknown>) => ReactNode
+  /** ≥0.2.1: PropsRenderFactories — the `conversation.chat.user.content` seat. */
+  renderFactorySlot?: (name: string, props: Record<string, unknown>) => ReactNode
   t: UserMessageTranslate
 }
 
@@ -301,6 +315,42 @@ export const OmUserMessageNodeView = memo(function OmUserMessageNodeView(
     props.notifyRollbackBlocked()
   }
 
+  const actions = (
+    <UserActions
+      text={text}
+      time={data.time}
+      rollbackAvailable={rollbackAvailable}
+      onRollback={onRollback}
+      t={t}
+    />
+  )
+
+  // DSH ≥0.2.1: the owner share carries the render factories instead of
+  // renderMessageImages, and the shipped bubble delegates its whole content
+  // stack to the user-content factory — mirror that call so the
+  // rollback-enabled replacement stays identical to the built-in it shadows.
+  if (props.renderFactorySlot !== undefined) {
+    return (
+      <div className={css.userRow}>
+        {props.renderFactorySlot('conversation.chat.user.content', {
+          content: {
+            text,
+            attachments,
+            extraBlocks: rest,
+            ...(data.referenceLabels === undefined ? {} : { referenceLabels: data.referenceLabels }),
+          },
+          loadImage: props.loadImage,
+          facts: {
+            ...(data.referenceLabels === undefined ? {} : { sessionLabels: data.referenceLabels }),
+            ...(data.skillNames === undefined ? {} : { skillNames: data.skillNames }),
+          },
+          interactive: true,
+        })}
+        {actions}
+      </div>
+    )
+  }
+
   return (
     <div className={css.userRow}>
       <div className={css.userStack}>
@@ -309,7 +359,7 @@ export const OmUserMessageNodeView = memo(function OmUserMessageNodeView(
             {attachments.map((attachment, index) => attachment.type === 'image'
               ? (
                 <Fragment key={`image:${index}`}>
-                  {props.renderMessageImages({ images: [attachment.image], align: 'end', compact: compactImages })}
+                  {props.renderMessageImages?.({ images: [attachment.image], align: 'end', compact: compactImages }) ?? null}
                 </Fragment>
               )
               : (
@@ -331,13 +381,15 @@ export const OmUserMessageNodeView = memo(function OmUserMessageNodeView(
                 built-in bubble passes { openFile, openSkill }; on 0.1.5
                 openSkill is absent and the host's 4-parameter copy ignores
                 the argument entirely. */}
-            {projectUserTextWithRefs(
-              text,
-              referenceLabels,
-              skillNames,
-              'skill',
-              props.openSkill === undefined ? undefined : { openFile: props.openFile, openSkill: props.openSkill },
-            )}
+            {projectUserTextWithRefs === undefined
+              ? (warnedMissingProjection || (console.warn('[observational-memory] host ui-primitives exports no projectUserText; user text renders without reference decoration'), warnedMissingProjection = true), text)
+              : projectUserTextWithRefs(
+                text,
+                referenceLabels,
+                skillNames,
+                'skill',
+                props.openSkill === undefined ? undefined : { openFile: props.openFile, openSkill: props.openSkill },
+              )}
             {rest.map((block, i) => (
               <JsonBlock key={i} label={t('message.extraBlock')} payload={block} truncatedLabel={truncated} />
             ))}
@@ -349,13 +401,7 @@ export const OmUserMessageNodeView = memo(function OmUserMessageNodeView(
           </div>
         )}
       </div>
-      <UserActions
-        text={text}
-        time={data.time}
-        rollbackAvailable={rollbackAvailable}
-        onRollback={onRollback}
-        t={t}
-      />
+      {actions}
     </div>
   )
 })
