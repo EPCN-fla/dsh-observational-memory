@@ -20,7 +20,7 @@ This plugin moves the memory work **earlier**, into the session itself, instead 
 - **The recall tool**: the model can recover the exact source evidence (timestamped original text) behind any memory id.
 - **The Memory tab**: a new conversation view tab showing the memory inventory, worker progress, memory content (visible / full), and debug logs, rendered live by the host.
 - **The rollback button**: every user message gains a rollback action that forks the session right before it and restores the text into the composer.
-- **Bilingual settings card**: the Observational Memory card under Settings → Plugins → Plugin configuration speaks 中文/English, and the model override is picked from the models added to DSH via cascading provider → model → reasoning-effort dropdowns.
+- **Bilingual settings card**: open the dsh-observational-memory package page under Settings → Plugins; its Observational Memory configuration card speaks 中文/English, and the model override is picked from the models added to DSH via cascading provider → model → reasoning-effort dropdowns.
 
 ## Core concepts
 
@@ -109,7 +109,7 @@ Restart DSH Web afterwards. Verify the mount: `dsh --profile web --dump-config |
 
 ### The settings card
 
-Open **Settings → Plugins → Plugin configuration** and expand the **Observational Memory** card at the very bottom; edits apply live on **Save** — no restart. The card is bilingual (中文/English) and follows the DSH language setting.
+Open **Settings → Plugins** and select **dsh-observational-memory** to reach its package page; edit the **Observational Memory** configuration card there — edits apply live on **Save**, no restart. The card is bilingual (中文/English) and follows the DSH language setting.
 
 - **Thresholds**: the compaction-threshold mode decides which single threshold parameter is shown — `calibrated` shows the static threshold, `ratio` shows the window ratio. Only the shown parameter is effective; the hidden one is inert however it is set.
 - **Model (optional)**: cascading provider → model ID → reasoning-effort dropdowns fed by the models added to DSH; a downstream dropdown stays empty until its upstream pick is made. Leave everything blank to let memory workers follow the session model.
