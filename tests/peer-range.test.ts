@@ -3,9 +3,10 @@
  *
  * The host enforces each plugin's `peerDependencies` at install and at
  * startup with `semver.satisfies(runtimeVersion, range, { includePrerelease:
- * true })` (packages/boot/app-boot/src/plugin-compatibility.ts, byte-stable
- * across 0.1.7-rc.1 … 0.2.0-rc.2). Two failure modes have bitten in practice
- * and must never regress:
+ * true })` (packages/boot/app-boot/src/plugin-compatibility.ts; that peers
+ * predicate is unchanged across 0.1.7-rc.1 … 0.2.1-rc.2 — the 0.2.1 rewrite
+ * only adds an opt-in `engines.dsh` alternative this plugin does not use).
+ * Two failure modes have bitten in practice and must never regress:
  *
  * - exact prerelease pins go stale the moment the host bumps (`0.1.7-rc.1`
  *   refuses `0.1.7-rc.2`), and
@@ -42,16 +43,22 @@ const SUPPORTED_HOSTS = [
   // 0.2.0 release candidates (rc.1/rc.2 audited — no consumed surface moved).
   '0.2.0-rc.1',
   '0.2.0-rc.2',
+  // 0.2.1 release candidates (rc.1/rc.2 audited against the exact tags:
+  // projectUserText left ui-primitives and the chat-node owner share moved
+  // to render factories — both adapted in src/client/user-message.tsx).
+  '0.2.1-rc.1',
+  '0.2.1-rc.2',
   // The windows are `>=`-floored inside each prerelease line by design:
   // future rcs of an already-audited line install without a plugin release.
   '0.1.7-rc.99',
   '0.2.0-rc.99',
+  '0.2.1-rc.99',
 ] as const
 
 /**
  * Hosts the range must keep refusing. The windows close BELOW each line's
  * final release on purpose: only audited prerelease lines are admitted, so
- * a final (0.1.7, 0.2.0) or the next line (0.2.1-alpha.1) always requires a
+ * a final (0.1.7, 0.2.0, 0.2.1) or the next line (0.3.0) always requires a
  * conscious range widening here — never a silent install.
  */
 const REFUSED_HOSTS = [
@@ -62,6 +69,7 @@ const REFUSED_HOSTS = [
   '0.1.7',
   '0.2.0',
   '0.2.1-alpha.1',
+  '0.2.1',
   '0.3.0',
 ] as const
 

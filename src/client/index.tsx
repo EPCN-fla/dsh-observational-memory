@@ -1,14 +1,15 @@
 /**
  * dsh-observational-memory — browser half.
  *
- * Registers the plugin's bilingual dictionaries, one expandable card under
- * Settings → Plugins → Plugin configuration (keyed by the `observational-memory`
- * settings namespace the host half serves), and the Memory conversation view
- * tab right of the Trajectory tab, fed by the host's Typert Remote endpoints.
+ * Registers the plugin's bilingual dictionaries, the bundle configuration
+ * card on this package's Plugins-page detail view (editing the
+ * `observational-memory` settings namespace the host half serves), and the
+ * Memory conversation view tab right of the Trajectory tab, fed by the
+ * host's Typert Remote endpoints.
  */
 import type { Context } from '@deepseek-ai/cordis'
 import type { ReactNode } from 'react'
-import { ObservationalMemoryCard, ObservationalMemoryRowConfig } from './card.tsx'
+import { ObservationalMemoryBundleConfig, ObservationalMemoryCard } from './card.tsx'
 import { CARD_FIELDS, OmCardController, resolveSettingsScope } from './controller.ts'
 import { en, LOCALE_NAMESPACE, zh } from './locales.ts'
 import { MemoryView } from './memory.tsx'
@@ -133,20 +134,22 @@ export function apply(ctx: Context): void {
       ),
     )
 
-    // DSH ≥0.1.7 — the Plugins page's row-configuration slot, keyed
-    // `<package name>#<row id>` (the row id this package's cordis.patch.yml
-    // declares). The retired settings.plugin.item above is never declared on
+    // DSH ≥0.1.7 — the bundle's own configuration, keyed by package name and
+    // rendered on this package's Plugins-page detail view between its
+    // description and its rows (one menu level above the per-row configure
+    // control). The retired settings.plugin.item above is never declared on
     // that host, this one is never declared on 0.1.5 — ctx.slots.inject waits
     // for the declaration harmlessly in both directions.
-    ctx.slots.inject('plugins.row.config', () =>
+    ctx.slots.inject('plugins.bundle.config', () =>
       ctx.slots.register(
         {
-          name: 'plugins.row.config',
-          key: 'dsh-observational-memory#observational-memory',
+          name: 'plugins.bundle.config',
+          key: 'dsh-observational-memory',
+          id: 'dsh-observational-memory-card',
           locale: NS,
           inject: () => cardController.inject() as unknown as Record<string, unknown>,
         },
-        ObservationalMemoryRowConfig as never,
+        ObservationalMemoryBundleConfig as never,
       ),
     )
   }

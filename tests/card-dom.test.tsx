@@ -267,16 +267,16 @@ describe('ObservationalMemoryCard model cascade', () => {
   })
 })
 
-describe('ObservationalMemoryRowConfig (DSH ≥0.1.7 Plugins page entry)', () => {
+describe('ObservationalMemoryBundleConfig (DSH ≥0.1.7 bundle page entry)', () => {
   it('renders the one-liner for the summary view', async () => {
-    const { ObservationalMemoryRowConfig } = await import('../src/client/card.tsx')
+    const { ObservationalMemoryBundleConfig } = await import('../src/client/card.tsx')
     const controller = new OmCardController(fakeScope({}), CARD_FIELDS, catalogRpc)
     const face = controller.inject()
     const useOmCard = <S,>(selector: (state: OmCardState) => S): S =>
       useSyncExternalStore(face.hooks.omCard.subscribe, () => selector(face.hooks.omCard.getSnapshot()))
     act(() => {
       root.render(
-        createElement(ObservationalMemoryRowConfig, {
+        createElement(ObservationalMemoryBundleConfig, {
           t,
           useOmCard,
           edit: face.edit,
@@ -294,14 +294,14 @@ describe('ObservationalMemoryRowConfig (DSH ≥0.1.7 Plugins page entry)', () =>
   })
 
   it('renders the full card for the page view', async () => {
-    const { ObservationalMemoryRowConfig } = await import('../src/client/card.tsx')
+    const { ObservationalMemoryBundleConfig } = await import('../src/client/card.tsx')
     const controller = new OmCardController(fakeScope({}), CARD_FIELDS, catalogRpc)
     const face = controller.inject()
     const useOmCard = <S,>(selector: (state: OmCardState) => S): S =>
       useSyncExternalStore(face.hooks.omCard.subscribe, () => selector(face.hooks.omCard.getSnapshot()))
     act(() => {
       root.render(
-        createElement(ObservationalMemoryRowConfig, {
+        createElement(ObservationalMemoryBundleConfig, {
           t,
           useOmCard,
           edit: face.edit,

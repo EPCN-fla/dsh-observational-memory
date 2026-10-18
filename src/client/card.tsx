@@ -1,7 +1,9 @@
 /**
- * The Observational Memory settings card: one expandable card at the bottom
- * of Settings → Plugins → Plugin configuration. Owns its chrome and controls
- * (the bundle-purity gate forbids importing the shipped cards' components).
+ * The Observational Memory settings card: the configuration form on this
+ * package's Plugins-page detail view (DSH ≥0.1.7), or one expandable card
+ * under Settings → Plugins → Plugin configuration on DSH 0.1.5. Owns its
+ * chrome and controls (the bundle-purity gate forbids importing the shipped
+ * cards' components).
  */
 import { useEffect, useRef, useState } from 'react'
 import type { LocaleKey } from './locales.ts'
@@ -456,13 +458,13 @@ export function ObservationalMemoryCard(props: ObservationalMemoryCardProps) {
 }
 
 /**
- * The DSH ≥0.1.7 plugin-manager row-configuration entry: the Plugins page
- * always passes `view` — `summary` for the row's one-liner (also the
- * missing-description fallback), `page` for the form with its save control.
+ * The DSH ≥0.1.7 plugin-manager bundle-configuration entry: the bundle's own
+ * page renders it between the description and the rows, always with
+ * `view: 'page'` (`summary` is the contract-shared one-liner fallback).
  * Older hosts never declare the slot, so this component is only ever
  * rendered there.
  */
-export function ObservationalMemoryRowConfig(props: ObservationalMemoryCardProps & { view: 'summary' | 'page' }) {
+export function ObservationalMemoryBundleConfig(props: ObservationalMemoryCardProps & { view: 'summary' | 'page' }) {
   if (props.view === 'summary') return <>{props.t('card.description')}</>
   // The page view IS the configuration page: render the form expanded, not
   // hidden behind the collapsible card chrome the settings-list row uses.
