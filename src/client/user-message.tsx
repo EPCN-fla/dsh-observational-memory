@@ -57,6 +57,23 @@ type ProjectUserText = (
 const projectUserTextWithRefs = (primitives as unknown as { projectUserText?: ProjectUserText }).projectUserText
 let warnedMissingProjection = false
 
+/** The ≤0.2.0 text projection, degrading to plain text (warned once) on a host without it. */
+function projectBubbleText(
+  text: string,
+  referenceLabels: readonly string[],
+  skillNames: readonly string[],
+  references: { openFile: (path: string) => void; openSkill: (name: string) => void } | undefined,
+): ReactNode {
+  if (projectUserTextWithRefs === undefined) {
+    if (!warnedMissingProjection) {
+      warnedMissingProjection = true
+      console.warn('[observational-memory] host ui-primitives exports no projectUserText; user text renders without reference decoration')
+    }
+    return text
+  }
+  return projectUserTextWithRefs(text, referenceLabels, skillNames, 'skill', references)
+}
+
 /** The node payload shape this renderer consumes (mirrors UserMessageNode). */
 export interface UserMessageNodeLike {
   seq: number
@@ -381,15 +398,12 @@ export const OmUserMessageNodeView = memo(function OmUserMessageNodeView(
                 built-in bubble passes { openFile, openSkill }; on 0.1.5
                 openSkill is absent and the host's 4-parameter copy ignores
                 the argument entirely. */}
-            {projectUserTextWithRefs === undefined
-              ? (warnedMissingProjection || (console.warn('[observational-memory] host ui-primitives exports no projectUserText; user text renders without reference decoration'), warnedMissingProjection = true), text)
-              : projectUserTextWithRefs(
-                text,
-                referenceLabels,
-                skillNames,
-                'skill',
-                props.openSkill === undefined ? undefined : { openFile: props.openFile, openSkill: props.openSkill },
-              )}
+            {projectBubbleText(
+              text,
+              referenceLabels,
+              skillNames,
+              props.openSkill === undefined ? undefined : { openFile: props.openFile, openSkill: props.openSkill },
+            )}
             {rest.map((block, i) => (
               <JsonBlock key={i} label={t('message.extraBlock')} payload={block} truncatedLabel={truncated} />
             ))}
