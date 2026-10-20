@@ -59,12 +59,12 @@ Differences from the Pi version (platform adaptations):
 
 The correspondence matrix between plugin versions and DSH versions is as follows:
 
-| Plugin version | Compatible DSH versions (peer-range semantics) |
+| Plugin version | Compatible DSH versions |
 | --- | --- |
-| 0.3.1 | 0.1.5-rc.2 ~ <0.1.5, 0.1.7-rc.1 ~ <0.1.7, 0.2.0-rc.1 ~ <0.2.0, 0.2.1-rc.1 ~ <0.2.1 |
-| 0.3.0 | 0.1.5-rc.2 ~ <0.1.5, 0.1.7-rc.1 ~ <0.1.7, 0.2.0-rc.1 ~ <0.2.0 |
-| 0.2.0 | 0.1.5-rc.2 ~ <0.1.5, 0.1.7-rc.1 |
-| 0.1.4 | ≥0.1.5-rc.2 |
+| 0.4.0 | >=0.1.5-rc.2 <0.1.5 \|\| >=0.1.7-rc.1 <0.1.7 \|\| >=0.2.0-rc.1 <0.2.0 \|\| >=0.2.1-rc.1 <0.2.1 |
+| 0.3.0 | >=0.1.5-rc.2 <0.1.5 \|\| >=0.1.7-rc.1 <0.1.7 \|\| >=0.2.0-rc.1 <0.2.0 |
+| 0.2.0 | >=0.1.5-rc.2 <0.1.5 \|\| 0.1.7-rc.1 |
+| 0.1.4 | >=0.1.5-rc.2 <0.1.5 |
 | 0.1.2 – 0.1.3 | 0.1.5-rc.2 |
 
 On 0.1.7 and later the plugin serves the profile-owned live configuration; on 0.1.5 it falls back to the legacy settings.yaml section, and the legacy document is imported automatically on the first 0.1.7 boot.
