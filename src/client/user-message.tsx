@@ -106,8 +106,12 @@ export interface UserMessageOwnerLike {
   loadImage?: unknown
   /** ≥0.2.1: PropsRenderFactories — the `conversation.chat.user.images` seat. */
   renderSlot?: (name: string, props: Record<string, unknown>) => ReactNode
-  /** ≥0.2.1: PropsRenderFactories — the `conversation.chat.user.content` seat. */
-  renderFactorySlot?: (name: string, props: Record<string, unknown>) => ReactNode
+  /** Generic factory API; the user-content definition may not be registered. */
+  renderFactorySlot?: (
+    name: string,
+    props: Record<string, unknown>,
+    options?: { fallback?: ReactNode },
+  ) => ReactNode
   t: UserMessageTranslate
 }
 
@@ -302,11 +306,6 @@ export const OmUserMessageNodeView = memo(function OmUserMessageNodeView(
   const { node, t } = props
   const data = node.data
   const { text, attachments, rest } = contentParts(data.content)
-  const referenceLabels = data.referenceLabels ?? []
-  const skillNames = data.skillNames ?? []
-  const compactImages = attachments.length > 1
-  const truncated = (total: number): string => t('json.truncated', { total })
-  const showBubble = text !== '' || rest.length > 0
 
   // text to restore, no attachments, and a completed earlier
   // turn to fork from (a turn-0 message has no rollback point).
@@ -342,10 +341,11 @@ export const OmUserMessageNodeView = memo(function OmUserMessageNodeView(
     />
   )
 
-  // DSH ≥0.2.1: the owner share carries the render factories instead of
-  // renderMessageImages, and the shipped bubble delegates its whole content
-  // stack to the user-content factory — mirror that call so the
-  // rollback-enabled replacement stays identical to the built-in it shadows.
+  // The generic factory API predates conversation.chat.user.content. DSH
+  // supplies it to every slot entry even when that definition is absent;
+  // FactoryOutlet then renders options.fallback (otherwise null). Keep the
+  // legacy content as a lazy React element so newer hosts only evaluate their
+  // own content pipeline, while older hosts retain text and attachments.
   if (props.renderFactorySlot !== undefined) {
     return (
       <div className={css.userRow}>
@@ -362,7 +362,7 @@ export const OmUserMessageNodeView = memo(function OmUserMessageNodeView(
             ...(data.skillNames === undefined ? {} : { skillNames: data.skillNames }),
           },
           interactive: true,
-        })}
+        }, { fallback: <LegacyUserContent {...props} /> })}
         {actions}
       </div>
     )
@@ -370,52 +370,66 @@ export const OmUserMessageNodeView = memo(function OmUserMessageNodeView(
 
   return (
     <div className={css.userRow}>
-      <div className={css.userStack}>
-        {attachments.length > 0 && (
-          <div className={css.attachmentRow} data-message-attachments>
-            {attachments.map((attachment, index) => attachment.type === 'image'
-              ? (
-                <Fragment key={`image:${index}`}>
-                  {props.renderMessageImages?.({ images: [attachment.image], align: 'end', compact: compactImages }) ?? null}
-                </Fragment>
-              )
-              : (
-                <span key={`file:${index}`} className={css.fileCard} title={attachment.file.name}>
-                  <FileTypeIcon path={attachment.file.name} className={css.fileIcon} />
-                  <span className={css.fileContent}>
-                    <span className={css.fileName}>{attachment.file.name}</span>
-                    <span className={css.fileMeta}>
-                      {[fileExtension(attachment.file.name).toUpperCase().slice(0, 8), fileSizeText(attachment.file.bytes)].filter(Boolean).join(' ')}
-                    </span>
-                  </span>
-                </span>
-              ))}
-          </div>
-        )}
-        {showBubble && (
-          <div className={css.bubble}>
-            {/* Chip actions ride the optional fifth argument: on 0.1.7 the
-                built-in bubble passes { openFile, openSkill }; on 0.1.5
-                openSkill is absent and the host's 4-parameter copy ignores
-                the argument entirely. */}
-            {projectBubbleText(
-              text,
-              referenceLabels,
-              skillNames,
-              props.openSkill === undefined ? undefined : { openFile: props.openFile, openSkill: props.openSkill },
-            )}
-            {rest.map((block, i) => (
-              <JsonBlock key={i} label={t('message.extraBlock')} payload={block} truncatedLabel={truncated} />
-            ))}
-          </div>
-        )}
-        {referenceLabels.length > 0 && (
-          <div className={css.referenceSummary}>
-            {t('message.referenceSummary', { labels: referenceLabels.join(t('message.referenceSeparator')) })}
-          </div>
-        )}
-      </div>
+      <LegacyUserContent {...props} />
       {actions}
     </div>
   )
 })
+
+/** Evaluated only when the host has no user-content factory definition. */
+function LegacyUserContent(props: UserMessageOwnerLike) {
+  const { node: { data }, t } = props
+  const { text, attachments, rest } = contentParts(data.content)
+  const referenceLabels = data.referenceLabels ?? []
+  const skillNames = data.skillNames ?? []
+  const compactImages = attachments.length > 1
+  const truncated = (total: number): string => t('json.truncated', { total })
+  const showBubble = text !== '' || rest.length > 0
+  return (
+    <div className={css.userStack}>
+      {attachments.length > 0 && (
+        <div className={css.attachmentRow} data-message-attachments>
+          {attachments.map((attachment, index) => attachment.type === 'image'
+            ? (
+              <Fragment key={`image:${index}`}>
+                {props.renderMessageImages?.({ images: [attachment.image], align: 'end', compact: compactImages }) ?? null}
+              </Fragment>
+            )
+            : (
+              <span key={`file:${index}`} className={css.fileCard} title={attachment.file.name}>
+                <FileTypeIcon path={attachment.file.name} className={css.fileIcon} />
+                <span className={css.fileContent}>
+                  <span className={css.fileName}>{attachment.file.name}</span>
+                  <span className={css.fileMeta}>
+                    {[fileExtension(attachment.file.name).toUpperCase().slice(0, 8), fileSizeText(attachment.file.bytes)].filter(Boolean).join(' ')}
+                  </span>
+                </span>
+              </span>
+            ))}
+        </div>
+      )}
+      {showBubble && (
+        <div className={css.bubble}>
+          {/* Chip actions ride the optional fifth argument: on 0.1.7 the
+              built-in bubble passes { openFile, openSkill }; on 0.1.5
+              openSkill is absent and the host's 4-parameter copy ignores
+              the argument entirely. */}
+          {projectBubbleText(
+            text,
+            referenceLabels,
+            skillNames,
+            props.openSkill === undefined ? undefined : { openFile: props.openFile, openSkill: props.openSkill },
+          )}
+          {rest.map((block, i) => (
+            <JsonBlock key={i} label={t('message.extraBlock')} payload={block} truncatedLabel={truncated} />
+          ))}
+        </div>
+      )}
+      {referenceLabels.length > 0 && (
+        <div className={css.referenceSummary}>
+          {t('message.referenceSummary', { labels: referenceLabels.join(t('message.referenceSeparator')) })}
+        </div>
+      )}
+    </div>
+  )
+}
