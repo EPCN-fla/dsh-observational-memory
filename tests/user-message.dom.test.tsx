@@ -60,6 +60,7 @@ function mount(options: {
   turn?: number
   content?: readonly unknown[]
   injected: Partial<RollbackInjected>
+  renderFactorySlot?: (name: string, props: Record<string, unknown>, options?: { fallback?: ReactNode }) => ReactNode
 }) {
   const injected: RollbackInjected = {
     rollbackWindow: () => ({ entries: [], hasMore: false }),
@@ -81,7 +82,8 @@ function mount(options: {
             content: options.content ?? [{ type: 'text', text: 'restore me' }],
           },
         },
-        renderMessageImages: () => null,
+        renderMessageImages: ({ images }: { images: unknown[] }) => createElement('span', { 'data-images': images.length }, 'image preview'),
+        renderFactorySlot: options.renderFactorySlot,
         openFile: () => {},
         openSkill: () => {},
         t,
@@ -98,6 +100,37 @@ function rollbackButton(): HTMLButtonElement {
 }
 
 describe('OmUserMessageNodeView rollback click', () => {
+  it('renders consecutive messages and rollback through a deferred missing-factory outlet', () => {
+    // The real host returns a React element immediately; only that element's
+    // later render discovers the missing definition. Checking the immediate
+    // return for null cannot detect this case.
+    const MissingFactory = ({ fallback }: { fallback?: ReactNode }) => fallback ?? null
+    const renderFactorySlot = (_name: string, _props: Record<string, unknown>, options?: { fallback?: ReactNode }) =>
+      createElement(MissingFactory, { fallback: options?.fallback })
+    const rollback = vi.fn()
+    for (const text of ['first visible message', 'second visible message']) {
+      mount({
+        dataSeq: 11,
+        content: [{ type: 'text', text }],
+        injected: { rollback, rollbackWindow: () => ({ entries: [{ seq: 3, type: 'turn/end' }], hasMore: false }) },
+        renderFactorySlot,
+      })
+      expect(container.textContent).toContain(text)
+      expect(container.querySelectorAll('button[aria-label="Copy"]')).toHaveLength(1)
+      act(() => { rollbackButton().click() })
+      expect(rollback).toHaveBeenLastCalledWith(3, text)
+    }
+    expect(rollback).toHaveBeenCalledTimes(2)
+    mount({
+      dataSeq: 11,
+      content: [{ type: 'image', attachment: { ref: 'image-1' } }],
+      injected: {},
+      renderFactorySlot,
+    })
+    expect(container.querySelector('[data-images="1"]')?.textContent).toBe('image preview')
+    expect(rollbackButton().getAttribute('aria-disabled')).toBe('true')
+  })
+
   it('forks at the last turn/end before the durable message seq', () => {
     const calls: [number, string][] = []
     mount({

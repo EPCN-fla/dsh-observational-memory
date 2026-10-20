@@ -40,6 +40,7 @@ function render(options: {
   n?: ReturnType<typeof node>
   locale?: Record<string, string>
   rollbackWindow?: () => { entries: { seq: number; type: string }[]; hasMore: boolean }
+  renderFactorySlot?: (name: string, props: Record<string, unknown>, options?: { fallback?: ReactNode }) => ReactNode
   rollback?: (anchor: number, text: string) => void
   notifyRollbackBlocked?: () => void
 }) {
@@ -50,6 +51,7 @@ function render(options: {
       renderMessageImages: () => null,
       openFile: () => {},
       openSkill: () => {},
+      renderFactorySlot: options.renderFactorySlot,
       t: (key: string, params?: Record<string, string | number>) => {
         const template = locale[key] ?? key
         return template.replace(/\{(\w+)\}/g, (_, name) => String(params?.[name] ?? ''))
@@ -67,6 +69,38 @@ describe('OmUserMessageNodeView', () => {
     expect(html).toContain('remember the codename')
     expect(html).toContain('Rollback')
     expect(html).toContain('Copy')
+  })
+
+  it('keeps the bubble when generic factories exist but the user-content factory is absent', () => {
+    // DSH 0.2.0 injects renderFactorySlot into every slot entry, before it
+    // supplies conversation.chat.user.content. FactoryOutlet resolves missing
+    // definitions to options.fallback (or null), not to a missing function.
+    const renderFactorySlot = vi.fn((_name, _props, options) => options?.fallback ?? null)
+    for (const text of ['first user message', 'second user message']) {
+      const html = render({
+        n: node({ content: [{ type: 'text', text }] }),
+        renderFactorySlot,
+      })
+      expect(html).toContain(text)
+      expect(html).toContain('Rollback')
+      expect(html).toContain('Copy')
+    }
+    expect(renderFactorySlot).toHaveBeenCalledTimes(2)
+  })
+
+  it('preserves file attachments and reference summaries in the missing-factory fallback', () => {
+    const n = node({ content: [
+      { type: 'text', text: 'review this file' },
+      { type: 'file', attachment: { name: 'notes.txt', bytes: 42 } },
+    ] })
+    const html = render({
+      n: { ...n, data: { ...n.data, referenceLabels: ['earlier-session'] } } as typeof n,
+      renderFactorySlot: (_name, _props, options) => options?.fallback ?? null,
+    })
+    expect(html).toContain('review this file')
+    expect(html).toContain('notes.txt')
+    expect(html).toContain('earlier-session')
+    expect(html).toContain('data-unavailable')
   })
 
   it('renders Chinese copy from the zh dictionary', () => {
