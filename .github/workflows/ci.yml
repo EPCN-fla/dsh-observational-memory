@@ -1,138 +1,122 @@
-# CI: PR 运行编译+测试；标签推送运行编译+测试+发布。
-# 普通分支推送不触发（on.push 只匹配 tags）。
-#
-# 发布使用 npm Trusted Publishing（OIDC），无需任何长期 token。前置配置
-# （一次性，在 npmjs.com 完成）：包 dsh-observational-memory → Settings →
-# Trusted Publisher → GitHub Actions：owner = EPCN-fla，repository =
-# dsh-observational-memory，workflow filename = ci.yml（environment 留空）。
-# 版本号由维护者手工升级（本工作流绝不改版本）；tag 必须等于
-# v${package.json.version}，否则语义门禁拒绝发布。
-
+# Branch pushes do not run CI. PR: one job per installable DSH, Node 22 then 24.
+# v* tags: release gate + build + npm Trusted Publishing only; no tests/uploads.
 name: ci
 
 on:
   pull_request:
   push:
-    tags:
-      - 'v*'
+    tags: ['v*']
+
+permissions:
+  contents: read
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # 编译 + 测试：PR 与标签推送都运行。
-  verify:
-    name: build + test
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    strategy:
-      matrix:
-        # engines 声明 ^22.19.0 || >=24：两条腿都跑，防止无意引入 24-only API。
-        node-version: [22, 24]
+  compatibility:
+    name: Read supported DSH versions
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node-version }}
-          cache: npm
+          node-version: 22
+      - name: Read package compatibility
+        id: matrix
+        run: node scripts/ci-compatibility.mjs matrix
 
-      # npm ci 严格按 package-lock.json 安装（含 esbuild 的 postinstall）。
-      - run: npm ci
-
-      - name: typecheck
-        run: npm run typecheck
-
-      - name: test
-        run: npm test
-
-      - name: build
-        run: npm run build
-
-      # 真实打包并消费产物：安装 tarball 并导入两个入口。dry-run 只列文件，
-      # 抓不住 exports 映射损坏、files 漏收（比如丢 cordis.patch.yml 会让
-      # dsh plugin add 直接失败）或 client 包装器回归。
-      - name: pack and consume the artifact
-        run: |
-          npm pack --silent --pack-destination /tmp
-          mkdir -p /tmp/om-consume && cd /tmp/om-consume
-          npm init -y >/dev/null
-          npm install --no-audit --no-fund /tmp/dsh-observational-memory-*.tgz
-          node -e "import('dsh-observational-memory').then((m) => { if (m.name !== 'observational-memory') throw new Error('host entry name mismatch') })"
-          node -e "
-            const fs = require('fs')
-            const path = require.resolve('dsh-observational-memory/client')
-            const head = fs.readFileSync(path, 'utf8').slice(0, 100)
-            if (!head.startsWith('window.__ModuleLoader__.load({ id: \"dsh-observational-memory\"')) throw new Error('client wrapper missing')
-            console.log('artifact OK:', require('dsh-observational-memory/package.json').version)
-          "
-
-  # 发布：仅标签推送；语义门禁全过后才 npm publish。
-  publish:
-    name: npm publish
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
-    needs: verify
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write # npm Trusted Publishing 的 OIDC 交换
+  verify:
+    name: DSH ${{ matrix.dsh-version }} · Node 22 + 24
+    needs: compatibility
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.compatibility.outputs.matrix) }}
+    env:
+      DSH_TEST_VERSION: ${{ matrix.dsh-version }}
     steps:
       - uses: actions/checkout@v4
+      - name: Set up Node 22
+        id: setup22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Select exact DSH cohort
+        id: cohort
+        run: |
+          # Validate the committed lock before selecting a different cohort.
+          npm ci --ignore-scripts
+          CHANGED=$(node scripts/ci-compatibility.mjs select "$DSH_TEST_VERSION")
+          if [ "$CHANGED" = 'changed=true' ]; then
+            # Resolve without the previous cohort's lock/node_modules peer tree.
+            LOCK_DIR=$(mktemp -d)
+            cp package.json "$LOCK_DIR/package.json"
+            (cd "$LOCK_DIR" && npm install --package-lock-only --ignore-scripts --no-audit --no-fund)
+            cp "$LOCK_DIR/package-lock.json" package-lock.json
+            rm -rf "$LOCK_DIR"
+          fi
+      - name: Verify Node 22
+        id: verify22
+        if: ${{ !cancelled() && steps.cohort.outcome == 'success' }}
+        run: node scripts/ci-verify.mjs verify 22
+      # A Node 22 failure must not hide the independent Node 24 result.
+      - name: Set up Node 24
+        id: setup24
+        if: ${{ !cancelled() }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Verify Node 24
+        id: verify24
+        if: ${{ !cancelled() && steps.setup24.outcome == 'success' && steps.cohort.outcome == 'success' }}
+        run: node scripts/ci-verify.mjs verify 24
+      - name: Test summary
+        if: always()
+        env:
+          SETUP_22: ${{ steps.setup22.outcome }}
+          SETUP_24: ${{ steps.setup24.outcome }}
+          VERIFY_22: ${{ steps.verify22.outcome }}
+          VERIFY_24: ${{ steps.verify24.outcome }}
+        run: node scripts/ci-verify.mjs summary
 
+  publish:
+    name: release gate + build + npm publish
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: npm
-
-      # Trusted Publishing 需要 npm CLI ≥ 11.5.1；钉在 11.x 主线内（不追
-      # latest，避免新版 npm 当天破坏 OIDC 交换）。
-      - name: ensure npm CLI with trusted publishing support
-        run: npm install -g npm@^11.5.1
-
-      - run: npm ci
-
-      # 语义门禁 1：tag 必须等于 v${package.json.version}。
-      - name: gate — tag matches package.json version
-        run: |
-          PKG_VERSION=$(node -p "require('./package.json').version")
-          if [ "${{ github.ref_name }}" != "v$PKG_VERSION" ]; then
-            echo "::error::tag ${{ github.ref_name }} != v$PKG_VERSION (package.json). 先手工升级版本号再打标签。"
-            exit 1
-          fi
-
-      # 语义门禁 2：预发布版本只能去非 latest 的 dist-tag（本项目声明为
-      # next）；稳定版本发布前拒绝让 latest 回退到更低版本。
-      - name: gate — dist-tag and latest-floor
-        run: |
-          PKG_VERSION=$(node -p "require('./package.json').version")
-          if [[ "$PKG_VERSION" == *-* ]]; then
-            echo "DIST_TAG=next" >> "$GITHUB_ENV"
-            echo "prerelease $PKG_VERSION → dist-tag next"
-          else
-            echo "DIST_TAG=latest" >> "$GITHUB_ENV"
-            # fail closed：读不到当前 latest（网络/注册表故障）就拒绝盲发，
-            # 而不是跳过地板检查；仅 E404（包从未发布）视为无地板。
-            LATEST=$(npm view dsh-observational-memory dist-tags.latest 2>&1) || {
-              if echo "$LATEST" | grep -q 'E404'; then
-                LATEST=""
-              else
-                echo "::error::无法读取 npm latest（非 E404），拒绝盲发：$LATEST"
-                exit 1
-              fi
-            }
-            if [ -n "$LATEST" ]; then
-              npx --yes semver@7 "$PKG_VERSION" -r ">$LATEST" > /dev/null || {
-                echo "::error::$PKG_VERSION 不高于现有 latest ($LATEST)，拒绝让 latest 回退。"
-                exit 1
-              }
-            fi
-            echo "stable $PKG_VERSION → dist-tag latest"
-          fi
-
-      # OIDC 可信发布：CLI 自动用 GitHub 的 OIDC token 换取短期发布凭据，
-      # 并自动生成 provenance 证明（无需 --provenance、无需 NODE_AUTH_TOKEN）。
-      # prepack 会在发布前再跑一次 build，保证发布产物与源码同步。
-      - name: publish (OIDC trusted publishing)
-        run: npm publish --access public --tag "$DIST_TAG"
+      # npm OIDC requires >=11.5.1. No long-lived npm token is used.
+      - name: Ensure npm CLI with trusted publishing support
+        run: npm install --global npm@11.6.2
+      - name: Install dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts
+      - name: Version, tag and npm latest gates
+        id: gate
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: node scripts/release-gate.mjs
+      - name: Build
+        run: npm run build
+      # Build is explicit; do not run tests, prepare or prepack on tags.
+      - name: Publish (OIDC trusted publishing)
+        env:
+          DIST_TAG: ${{ steps.gate.outputs.dist-tag }}
+        run: npm publish --ignore-scripts --access public --provenance --tag "$DIST_TAG" --registry https://registry.npmjs.org
