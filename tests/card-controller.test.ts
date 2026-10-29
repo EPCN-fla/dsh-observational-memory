@@ -78,6 +78,58 @@ describe('OmCardController save failure paths', () => {
     expect(state().dirty).toBe(true)
   })
 
+  it('uses one revision-fenced atomic mutation when the Host supports it', async () => {
+    const base = fakeScope({})
+    const batches: unknown[] = []
+    let individualWrites = 0
+    const scope: SettingsScopeLike = {
+      ...base,
+      set: async () => { individualWrites++ },
+      mutate: async (ops, revision) => {
+        batches.push({ ops, revision })
+        for (const op of ops) {
+          if (op.op === 'set') await base.set(op.path[0], op.value)
+          else await base.unset(op.path[0])
+        }
+        return true
+      },
+    }
+    const { face, state } = makeController(scope)
+    face.edit('observeAfterTokens', '5000')
+    face.edit('passive', 'true')
+    face.save()
+    await new Promise(resolve => setTimeout(resolve, 10))
+    expect(individualWrites).toBe(0)
+    expect(batches).toEqual([{
+      ops: [
+        { op: 'set', path: ['observeAfterTokens'], value: 5000 },
+        { op: 'set', path: ['passive'], value: true },
+      ],
+      revision: 1,
+    }])
+    expect(state().failed).toBe(false)
+    expect(state().partial).toBe(false)
+  })
+
+  it('reports a partial legacy commit instead of presenting the whole batch as refused', async () => {
+    const base = fakeScope({})
+    const scope: SettingsScopeLike = {
+      ...base,
+      set: async (field, value) => {
+        if (field === 'passive') throw new Error('second field refused')
+        return base.set(field, value)
+      },
+    }
+    const { face, state } = makeController(scope)
+    face.edit('observeAfterTokens', '5000')
+    face.edit('passive', 'true')
+    face.save()
+    await new Promise(resolve => setTimeout(resolve, 10))
+    expect(state().failed).toBe(true)
+    expect(state().partial).toBe(true)
+    expect(base.getSnapshot().user).toMatchObject({ observeAfterTokens: 5000 })
+  })
+
   it('attempts no writes on a read-only scope', async () => {
     let writes = 0
     const scope = fakeScope({})

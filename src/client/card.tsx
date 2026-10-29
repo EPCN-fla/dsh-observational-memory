@@ -450,7 +450,7 @@ export function ObservationalMemoryCard(props: ObservationalMemoryCardProps) {
           />
 
           <div className={css.footer}>
-            {state.failed ? <p className={css.failed} role="status">{t('state.saveFailed')}</p> : null}
+            {state.failed ? <p className={css.failed} role="status">{t(state.partial ? 'state.savePartial' : 'state.saveFailed')}</p> : null}
             <button
               type="button"
               className={css.discard}
