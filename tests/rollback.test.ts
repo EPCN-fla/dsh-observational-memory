@@ -80,6 +80,19 @@ describe('forkRollbackSession', () => {
     expect(order).toEqual(['retain:child', 'draft:original text', 'open:child', 'release'])
   })
 
+  it('uses the host navigation callback when one is provided', async () => {
+    const opened: string[] = []
+    const scope = {}
+    const sessions: RollbackSessions = {
+      fork: async () => 'child',
+      retainAgentScope: () => ({ release: () => {} }),
+      scope: () => scope,
+      open: () => { throw new Error('history-only open must not be used') },
+    }
+    await forkRollbackSession(sessions, 'source', 3, 'text', () => {}, () => {}, id => { opened.push(id) })
+    expect(opened).toEqual(['child'])
+  })
+
   it('continues with a child created before a later fork-step failure', async () => {
     const opened: string[] = []
     const drafts: string[] = []
