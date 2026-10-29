@@ -78,7 +78,7 @@ test('verification records failures, continues independent checks and summarizes
   assert.ok(report.steps.slice(1).every(s => s.status === 'skipped'))
 }))
 
-test('workflow isolates PR validation from tag-only publishing with no artifact uploads', () => {
+test('workflow isolates PR validation but gates tag-only publishing on the full local check', () => {
   const workflow = parse(readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8'))
   assert.deepEqual(workflow.on, { pull_request: null, push: { tags: ['v*'] } })
   assert.equal(workflow.jobs.publish.needs, undefined)
@@ -92,6 +92,8 @@ test('workflow isolates PR validation from tag-only publishing with no artifact 
     assert.ok(job.steps.every(s => !s.uses?.includes('artifact')))
   }
   const publishCommands = workflow.jobs.publish.steps.map(s => s.run ?? '').join('\n')
-  assert.doesNotMatch(publishCommands, /npm (test|run (check|test|pack:check))/)
-  assert.match(publishCommands, /npm publish --ignore-scripts/)
+  const check = publishCommands.indexOf('npm run check')
+  const publish = publishCommands.indexOf('npm publish --ignore-scripts')
+  assert.ok(check >= 0, 'tag publishing must run the full local gate')
+  assert.ok(publish > check, 'the full local gate must precede npm publish')
 })

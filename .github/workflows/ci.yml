@@ -1,5 +1,5 @@
 # Branch pushes do not run CI. PR: one job per installable DSH, Node 22 then 24.
-# v* tags: release gate + build + npm Trusted Publishing only; no tests/uploads.
+# v* tags: independent release job with the full local gate; no matrix/uploads.
 name: ci
 
 on:
@@ -113,9 +113,11 @@ jobs:
         env:
           RELEASE_TAG: ${{ github.ref_name }}
         run: node scripts/release-gate.mjs
-      - name: Build
-        run: npm run build
-      # Build is explicit; do not run tests, prepare or prepack on tags.
+      # A tag alone is not evidence: verify this exact tagged SHA before OIDC publish.
+      # check includes typecheck, unit/script tests, build and tarball consumer smoke.
+      - name: Verify release source and artifact
+        run: npm run check
+      # Build is explicit in check; do not run prepare or prepack again on tags.
       - name: Publish (OIDC trusted publishing)
         env:
           DIST_TAG: ${{ steps.gate.outputs.dist-tag }}
