@@ -571,6 +571,56 @@ describe('consolidation scheduling', () => {
       .toEqual([events.length - 2, newSeq])
   })
 
+  it('retries a failed automatic pass without requiring another session event', async () => {
+    vi.useFakeTimers()
+    const runtime = new OmRuntime(
+      PlainConfig({ observeAfterTokens: 10, reflectAfterTokens: 100_000, storageDir: dir }),
+      { onError: () => {} },
+    )
+    try {
+      const events = longConversation(20)
+      const { ctx, callCount } = fakeCtx([
+        { finish: 'error' },
+        {
+          toolCalls: [{
+            id: 'retry', name: 'record_observations', arguments: JSON.stringify({ observations: [{
+              timestamp: '2026-01-15 14:30', content: 'Recovered after a transient failure.', relevance: 'high', sourceEventSeqs: [0],
+            }] }),
+          }],
+        },
+        { text: 'done' },
+      ])
+      await maybeLaunchConsolidation(ctx, runtime, fakeSession(events))
+      expect(callCount()).toBe(1)
+      expect(runtime.store.entries('s1')).toHaveLength(0)
+
+      await vi.advanceTimersByTimeAsync(1_000)
+      await vi.waitFor(() => expect(callCount()).toBe(3))
+      await vi.waitFor(() => expect(runtime.consolidationInFlight.size).toBe(0))
+      expect(runtime.store.entries('s1')).toHaveLength(1)
+      expect(runtime.lastObserverError.has('s1')).toBe(false)
+    } finally {
+      runtime.clearConsolidationRetries()
+      vi.useRealTimers()
+    }
+  })
+
+  it('cancels a scheduled retry when the session is disposed', async () => {
+    vi.useFakeTimers()
+    const runtime = new OmRuntime(PlainConfig({ observeAfterTokens: 10, storageDir: dir }), { onError: () => {} })
+    try {
+      const { ctx, callCount } = fakeCtx([{ finish: 'error' }])
+      await maybeLaunchConsolidation(ctx, runtime, fakeSession(longConversation(20)))
+      expect(callCount()).toBe(1)
+      runtime.clearSession('s1')
+      await vi.advanceTimersByTimeAsync(30_000)
+      expect(callCount()).toBe(1)
+    } finally {
+      runtime.clearConsolidationRetries()
+      vi.useRealTimers()
+    }
+  })
+
   it('keeps active slots owned across disposal cleanup and rejects stale releases', () => {
     const runtime = new OmRuntime(PlainConfig({ storageDir: dir }), { onError: () => {} })
     const first = runtime.claimConsolidation('s1')!
@@ -598,6 +648,7 @@ describe('consolidation triggers', () => {
       return () => {}
     }
     const runtime = new OmRuntime(PlainConfig({ observeAfterTokens: 10, storageDir: dir }), { onError: () => {} })
+    ctx.effect = () => {}
     registerConsolidationTrigger(ctx as never, runtime)
 
     expect(handlers.has('agent/session-start')).toBe(false)

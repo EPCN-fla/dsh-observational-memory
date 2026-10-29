@@ -57,6 +57,7 @@ export class OmRuntime {
   claimConsolidation(sessionId: string): symbol | undefined {
     if (this.consolidationOwners.has(sessionId)) return undefined
     const owner = Symbol(sessionId)
+    this.cancelConsolidationRetryTimer(sessionId)
     this.consolidationOwners.set(sessionId, owner)
     this.consolidationInFlight.add(sessionId)
     return owner
@@ -68,6 +69,45 @@ export class OmRuntime {
     this.consolidationOwners.delete(sessionId)
     this.consolidationInFlight.delete(sessionId)
     return true
+  }
+
+  private readonly consolidationRetryTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  private readonly consolidationRetryAttempts = new Map<string, number>()
+
+  /** Clear one pending retry timer while retaining its backoff attempt count. */
+  private cancelConsolidationRetryTimer(sessionId: string): void {
+    const timer = this.consolidationRetryTimers.get(sessionId)
+    if (timer !== undefined) clearTimeout(timer)
+    this.consolidationRetryTimers.delete(sessionId)
+  }
+
+  /** Schedule one bounded automatic retry; external triggers cancel the timer on claim. */
+  scheduleConsolidationRetry(session: Session, retry: () => void): void {
+    const sessionId = session.id
+    this.cancelConsolidationRetryTimer(sessionId)
+    const attempt = (this.consolidationRetryAttempts.get(sessionId) ?? 0) + 1
+    if (attempt > 5) return
+    this.consolidationRetryAttempts.set(sessionId, attempt)
+    const timer = setTimeout(() => {
+      this.consolidationRetryTimers.delete(sessionId)
+      retry()
+    }, Math.min(1_000 * 2 ** (attempt - 1), 30_000))
+    timer.unref?.()
+    this.consolidationRetryTimers.set(sessionId, timer)
+    this.debug(sessionId, 'consolidation.retry_scheduled', { attempt, delayMs: Math.min(1_000 * 2 ** (attempt - 1), 30_000) })
+  }
+
+  /** Stop retrying after success, manual intervention, passive mode or no backlog. */
+  clearConsolidationRetry(sessionId: string): void {
+    this.cancelConsolidationRetryTimer(sessionId)
+    this.consolidationRetryAttempts.delete(sessionId)
+  }
+
+  /** Plugin unload: no timer may retain a disposed runtime or session. */
+  clearConsolidationRetries(): void {
+    for (const timer of this.consolidationRetryTimers.values()) clearTimeout(timer)
+    this.consolidationRetryTimers.clear()
+    this.consolidationRetryAttempts.clear()
   }
 
   /** Sessions with a proactive compaction currently in flight. */
@@ -243,6 +283,7 @@ export class OmRuntime {
     // same-id reattach run concurrently with the old task; their finally
     // blocks release them after the work actually settles.
     this.consolidationPending.delete(sessionId)
+    this.clearConsolidationRetry(sessionId)
   }
 
   /**

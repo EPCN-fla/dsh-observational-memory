@@ -66,6 +66,7 @@ function isMemorySession(session: Session): boolean {
 }
 
 export function registerConsolidationTrigger(ctx: Context, runtime: OmRuntime): void {
+  ctx.effect(() => () => runtime.clearConsolidationRetries(), 'observational-memory: consolidation retries')
   ctx.on('session/event', (session, event) => {
     if (event.type !== 'turn/end') return
     if (!isMemorySession(session)) return
@@ -99,8 +100,11 @@ export async function maybeLaunchConsolidation(ctx: Context, runtime: OmRuntime,
   // with its source even with every background worker disabled.
   await runtime.ensureInherited(ctx, session)
   const config = runtime.config
-  if (config.passive) return
   const sessionId: string = session.id
+  if (config.passive) {
+    runtime.clearConsolidationRetry(sessionId)
+    return
+  }
   // Coalesce (rather than drop) a trigger that arrives during an active run.
   // The active snapshot predates this event, so its owner performs one
   // trailing due-check with the latest session after settling.
@@ -114,10 +118,15 @@ export async function maybeLaunchConsolidation(ctx: Context, runtime: OmRuntime,
     const events = session.snapshotEvents()
     const observerDue = rawTokensSinceObservationCoverage(events, entries) >= config.observeAfterTokens
     const reflectorDue = rawTokensSinceReflectionCoverage(events, entries) >= config.reflectAfterTokens
-    if (!observerDue && !reflectorDue) return
+    if (!observerDue && !reflectorDue) {
+      runtime.clearConsolidationRetry(sessionId)
+      return
+    }
 
     runtime.clearStageErrors(sessionId)
-    await runConsolidationPipeline(ctx, runtime, session)
+    const succeeded = await runConsolidationPipeline(ctx, runtime, session)
+    if (succeeded) runtime.clearConsolidationRetry(sessionId)
+    else runtime.scheduleConsolidationRetry(session, () => launch(ctx, runtime, session))
   } finally {
     const released = runtime.releaseConsolidation(sessionId, owner)
     releaseDisposedSession(ctx, runtime, session)
@@ -167,6 +176,7 @@ export async function runConsolidationNow(ctx: Context, runtime: OmRuntime, sess
   if (owner === undefined) return false
   try {
     await runtime.ensureInherited(ctx, session)
+    runtime.clearConsolidationRetry(sessionId)
     runtime.clearStageErrors(sessionId)
     await runConsolidationPipeline(ctx, runtime, session, { force: true })
     return true
@@ -187,7 +197,7 @@ export async function runConsolidationPipeline(
   runtime: OmRuntime,
   session: Session,
   options: ConsolidationOptions = {},
-): Promise<void> {
+): Promise<boolean> {
   const notify = makeNotify(ctx, runtime)
   const sessionId: string = session.id
   let agent: Agent | undefined
@@ -198,7 +208,7 @@ export async function runConsolidationPipeline(
   }
 
   let cached: ResolveResult | undefined
-  const resolveModel = async (): Promise<ResolvedModel | undefined> => {
+  const resolveModel = async (): Promise<ResolvedModel> => {
     cached ??= await runtime.resolveModel(ctx, session, agent)
     if (cached.ok) {
       runtime.resolveFailureNotified.delete(sessionId)
@@ -209,7 +219,7 @@ export async function runConsolidationPipeline(
       runtime.resolveFailureNotified.add(sessionId)
       notify('warning', `memory worker skipped — ${cached.reason}`)
     }
-    return undefined
+    throw new Error(`memory worker model unavailable: ${cached.reason}`)
   }
 
   try {
@@ -218,7 +228,7 @@ export async function runConsolidationPipeline(
     const { message, consecutiveFailures } = runtime.recordStageError(sessionId, 'observer', error)
     runtime.debug(sessionId, 'observer.error', { errorMessage: message, consecutiveFailures })
     notify('warning', `observer failed: ${message} (consecutive failures: ${consecutiveFailures})`)
-    return
+    return false
   }
 
   let reflectorResult: { reflections: Reflection[]; coverageSeq?: number }
@@ -228,7 +238,7 @@ export async function runConsolidationPipeline(
     const { message, consecutiveFailures } = runtime.recordStageError(sessionId, 'reflector', error)
     runtime.debug(sessionId, 'reflector.error', { errorMessage: message, consecutiveFailures })
     notify('warning', `reflector failed: ${message} (consecutive failures: ${consecutiveFailures})`)
-    return
+    return false
   }
 
   try {
@@ -237,14 +247,16 @@ export async function runConsolidationPipeline(
     const { message, consecutiveFailures } = runtime.recordStageError(sessionId, 'dropper', error)
     runtime.debug(sessionId, 'dropper.error', { errorMessage: message, consecutiveFailures })
     notify('warning', `dropper failed: ${message} (consecutive failures: ${consecutiveFailures})`)
+    return false
   }
+  return true
 }
 
 async function runObserverStage(
   ctx: Context,
   runtime: OmRuntime,
   session: Session,
-  resolveModel: () => Promise<ResolvedModel | undefined>,
+  resolveModel: () => Promise<ResolvedModel>,
   notify: Notify,
   options: ConsolidationOptions = {},
 ): Promise<void> {
@@ -274,7 +286,6 @@ async function runObserverStage(
   }
 
   const resolved = await resolveModel()
-  if (!resolved) return
 
   // The full post-watermark range (not just source events): the serializer
   // skips non-source content but needs tool/call events for result labels.
@@ -341,7 +352,7 @@ async function runReflectorStage(
   ctx: Context,
   runtime: OmRuntime,
   session: Session,
-  resolveModel: () => Promise<ResolvedModel | undefined>,
+  resolveModel: () => Promise<ResolvedModel>,
   notify: Notify,
   options: ConsolidationOptions = {},
 ): Promise<{ reflections: Reflection[]; coverageSeq?: number }> {
@@ -363,7 +374,6 @@ async function runReflectorStage(
   if (options.force && foldLedger(entries).activeObservations.length === 0) return { reflections: [] }
 
   const resolved = await resolveModel()
-  if (!resolved) return { reflections: [] }
 
   notify('info', `reflector running (~${reflectionTokens.toLocaleString()} tokens)`)
   const folded = foldLedger(entries)
@@ -399,7 +409,7 @@ async function runDropperStage(
   ctx: Context,
   runtime: OmRuntime,
   session: Session,
-  resolveModel: () => Promise<ResolvedModel | undefined>,
+  resolveModel: () => Promise<ResolvedModel>,
   notify: Notify,
   sameRunReflections: Reflection[],
   sameRunReflectionCoverageSeq: number | undefined,
@@ -430,7 +440,6 @@ async function runDropperStage(
     `dropper running after reflection — active observation pool ~${metrics.observationTokens.toLocaleString()} / ${metrics.targetTokens.toLocaleString()} target tokens`,
   )
   const resolved = await resolveModel()
-  if (!resolved) return
 
   const reflectionsForDropper = mergeReflections(folded.reflections, sameRunReflections)
   const droppedIds = await runDropper(ctx, {
