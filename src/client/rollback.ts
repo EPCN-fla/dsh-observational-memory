@@ -80,6 +80,7 @@ export async function forkRollbackSession(
   text: string,
   restoreDraft: (scope: unknown, text: string) => void,
   notify: (failure: 'fork' | 'restore') => void,
+  openSession?: (childId: string) => void,
 ): Promise<void> {
   let createdChildId: string | undefined
   let childId: string
@@ -101,6 +102,7 @@ export async function forkRollbackSession(
     childId = createdChildId
   }
 
+  const open = openSession ?? ((childId: string) => sessions.open(childId))
   let reference: { release(): void } | undefined
   try {
     reference = sessions.retainAgentScope?.(childId)
@@ -109,13 +111,13 @@ export async function forkRollbackSession(
     if (scope === undefined && reference === undefined) {
       // Legacy fallback: open establishes the retained generation. Current
       // hosts take the retain-first path so the draft exists before binding.
-      sessions.open(childId)
+      open(childId)
       opened = true
       scope = sessions.scope(childId)
     }
     if (scope === undefined) throw new Error('rollback child scope is unavailable')
     restoreDraft(scope, text)
-    if (!opened) sessions.open(childId)
+    if (!opened) open(childId)
   } catch {
     notify('restore')
   } finally {

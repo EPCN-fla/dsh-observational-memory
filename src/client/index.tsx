@@ -67,6 +67,10 @@ interface SessionsService {
 }
 
 /** The conversation-service slice used to seed the forked session's draft. */
+interface UiWorkspaceService {
+  openSession(id: string): void
+}
+
 interface ConversationService {
   input: {
     for(scope: unknown): { setDraft(text: string): void; notify(level: 'info' | 'error', text: string): void }
@@ -159,6 +163,7 @@ export function apply(ctx: Context): void {
   // renderers are replaced while this plugin is loaded; the built-ins return
   // on unload.
   const sessions = ctx.get('sessions') as unknown as SessionsService
+  const uiWorkspace = ctx.get('uiWorkspace') as UiWorkspaceService | undefined
   const composerNotice = (sessionId: string, level: 'info' | 'error', text: string): void => {
     const scope = sessions.scope(sessionId)
     if (scope !== undefined) ctx.conversation.input.for(scope).notify(level, text)
@@ -182,6 +187,13 @@ export function apply(ctx: Context): void {
         'error',
         t(failure === 'fork' ? 'message.rollbackFailed' : 'message.rollbackRestoreFailed'),
       ),
+      childId => {
+        // DSH 0.2.1: sessions.open only opens history; uiWorkspace performs
+        // the actual selection + Conversation navigation. Older hosts keep
+        // their previous sessions.open fallback through the helper.
+        if (uiWorkspace) uiWorkspace.openSession(childId)
+        else sessions.open(childId)
+      },
     ),
     notifyRollbackBlocked: () => composerNotice(sessionId, 'info', t('message.rollbackBlocked')),
   })
