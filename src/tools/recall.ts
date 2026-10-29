@@ -10,6 +10,15 @@ import { renderRecallSourceEvents, toolNameByCallId } from '../serialize.ts'
 import type { OmRuntime } from '../runtime.ts'
 
 const MEMORY_ID_PATTERN = /^[a-f0-9]{12}$/
+/** Maximum evidence characters per model-visible recall page. */
+export const RECALL_PAGE_CHARS = 50_000
+
+export function recallPage(text: string, offset = 0): string {
+  const end = Math.min(text.length, offset + RECALL_PAGE_CHARS)
+  const page = text.slice(offset, end)
+  if (end >= text.length) return page
+  return `${page}\n\n[Recall output truncated at character ${end} of ${text.length}. Call recall again with the same id and offset ${end} for the next page.]`
+}
 
 function renderFound(result: Extract<RecallResult, { status: 'found' }>, toolNames: ReadonlyMap<string, string>): string {
   const sections: string[] = []
@@ -62,6 +71,10 @@ export function registerRecallTool(ctx: Context, runtime: OmRuntime): void {
           description:
             '12-character lowercase hex observation or reflection id shown in compacted memory or a previous recall result. Must be a specific id; this tool does not search by topic.',
         },
+        offset: {
+          type: 'number',
+          description: `Zero-based character offset for continuation when a previous result was truncated. Each page is at most ${RECALL_PAGE_CHARS} source characters.`,
+        },
       },
       output: {
         schema: { type: 'string' },
@@ -69,8 +82,10 @@ export function registerRecallTool(ctx: Context, runtime: OmRuntime): void {
       },
       async execute(args, exec) {
         const memoryId = args.id
+        const offset = args.offset ?? 0
+        if (!Number.isSafeInteger(offset) || offset < 0) return 'Recall offset must be a non-negative safe integer.'
         if (!MEMORY_ID_PATTERN.test(memoryId)) {
-          return `Memory id must be 12 lowercase hex characters. Received: ${memoryId}`
+          return 'Memory id must be exactly 12 lowercase hex characters.'
         }
         const agent = exec.agent
         if (!agent) return 'recall is unavailable outside an agent session.'
@@ -82,7 +97,9 @@ export function registerRecallTool(ctx: Context, runtime: OmRuntime): void {
         if (result.status === 'not_found') {
           return `No observation or reflection with id ${memoryId} was found in this session's memory.`
         }
-        return renderFound(result, toolNameByCallId(events))
+        const rendered = renderFound(result, toolNameByCallId(events))
+        if (offset >= rendered.length && offset > 0) return `Recall offset ${offset} is beyond the ${rendered.length}-character result.`
+        return recallPage(rendered, offset)
       },
     }),
   )

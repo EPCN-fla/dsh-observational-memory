@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Context } from '@deepseek-ai/cordis'
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
 import { PlainConfig } from '../src/config.ts'
-import { registerRecallTool } from '../src/tools/recall.ts'
+import { RECALL_PAGE_CHARS, registerRecallTool } from '../src/tools/recall.ts'
 import { OmRuntime } from '../src/runtime.ts'
 import { makeObservation, makeReflection, resetSeqs, userEvent } from './fixtures.ts'
 
@@ -56,6 +56,13 @@ describe('recall tool', () => {
     expect(value).toContain('12 lowercase hex')
   })
 
+  it('does not echo an oversized malformed id', async () => {
+    const { tool } = await setup()
+    const value = await tool.execute({ id: 'x'.repeat(1_000_000) }, execWith([])) as string
+    expect(value.length).toBeLessThan(200)
+    expect(value).not.toContain('xxxx')
+  })
+
   it('reports unknown ids', async () => {
     const { tool } = await setup()
     const value = await tool.execute({ id: 'a1b2c3d4e5f6' }, execWith([]))
@@ -102,5 +109,29 @@ describe('recall tool', () => {
     const value = (await tool.execute({ id: observation.id }, execWith([source]))) as string
     expect(value).toContain('[dropped]')
     expect(value).toContain('old detail')
+  })
+})
+
+describe('recall pagination', () => {
+  it('bounds each result and retrieves the remaining source by offset', async () => {
+    resetSeqs()
+    const source = userEvent(`HEAD${'x'.repeat(120_000)}TAIL`)
+    const observation = makeObservation({ content: 'Large evidence.', sourceEventSeqs: [source.seq] })
+    const { runtime, tool } = await setup()
+    await runtime.store.append('s1', { kind: 'observations-recorded', observations: [observation], coversUpToSeq: source.seq })
+
+    const first = await tool.execute({ id: observation.id }, execWith([source])) as string
+    expect(first.length).toBeLessThan(RECALL_PAGE_CHARS + 300)
+    expect(first).toContain('Recall output truncated')
+    const offset = Number(/offset (\d+) for the next page/.exec(first)?.[1])
+    expect(Number.isSafeInteger(offset)).toBe(true)
+    let nextOffset = offset
+    let last = first
+    for (let page = 0; page < 4 && last.includes('Recall output truncated'); page++) {
+      last = await tool.execute({ id: observation.id, offset: nextOffset }, execWith([source])) as string
+      nextOffset = Number(/offset (\d+) for the next page/.exec(last)?.[1])
+    }
+    expect(last).toContain('TAIL')
+    expect(last).not.toContain('Recall output truncated')
   })
 })
