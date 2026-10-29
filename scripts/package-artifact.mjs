@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { readFile, mkdir, writeFile, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
 import assert from 'node:assert/strict'
@@ -14,7 +14,7 @@ await mkdir('artifacts', { recursive: true })
 // immutable input for manifest, wrapper and consumer-resolution checks.
 const [packed] = JSON.parse(execFileSync('npm', ['pack', '--ignore-scripts', '--json', '--pack-destination', 'artifacts'], { encoding: 'utf8' }))
 const names = packed.files.map(file => file.path)
-for (const required of ['lib/index.js', 'lib/client.js', 'cordis.patch.yml', 'README.md', 'README.en.md', 'LICENSE']) {
+for (const required of ['lib/index.js', 'lib/client.js', 'cordis.patch.yml', 'icon.svg', 'README.md', 'README.en.md', 'LICENSE']) {
   assert.ok(names.includes(required), `Missing ${required}`)
 }
 const patch = parse(await readFile('cordis.patch.yml', 'utf8'))
@@ -35,6 +35,11 @@ try {
   assert.ok(packedClient.startsWith('window.__ModuleLoader__.load({'))
   const packedManifest = require(`${manifest.name}/package.json`)
   assert.equal(packedManifest.version, manifest.version)
+  assert.equal(packedManifest.icon, 'icon.svg')
+  const manifestPath = require.resolve(`${manifest.name}/package.json`)
+  const icon = await readFile(join(dirname(manifestPath), packedManifest.icon))
+  assert.ok(icon.length <= 256 * 1024, 'icon exceeds the DSH metadata limit')
+  assert.ok(icon.toString('utf8').includes('<svg'), 'icon is not an SVG document')
 } finally {
   await rm(consumer, { recursive: true, force: true })
 }

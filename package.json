@@ -28,7 +28,8 @@
     "cordis.patch.yml",
     "README.md",
     "README.en.md",
-    "LICENSE"
+    "LICENSE",
+    "icon.svg"
   ],
   "scripts": {
     "build": "node build.mjs",
@@ -123,5 +124,6 @@
     "0.2.1-rc.4": {
       "cordis": "4.0.5"
     }
-  }
+  },
+  "icon": "icon.svg"
 }
