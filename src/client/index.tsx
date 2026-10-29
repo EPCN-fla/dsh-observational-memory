@@ -14,7 +14,7 @@ import { CARD_FIELDS, OmCardController, resolveSettingsScope } from './controlle
 import { en, LOCALE_NAMESPACE, zh } from './locales.ts'
 import { MemoryView } from './memory.tsx'
 import { OmMemoryController, type ConnectionRpcLike, type MemoryViewMode } from './memory.ts'
-import type { RollbackEventView } from './rollback.ts'
+import { forkRollbackSession, type RollbackEventView } from './rollback.ts'
 import { OmUserMessageNodeView, type RollbackInjected } from './user-message.tsx'
 
 export const name = 'dsh-observational-memory-ui'
@@ -171,22 +171,18 @@ export function apply(ctx: Context): void {
         hasMore: snapshot?.hasMore ?? false,
       }
     },
-    rollback: (anchorSeq, text) => {
-      void sessions
-        .fork({ sessionId, atSeq: anchorSeq, increaseTitle: true })
-        .then((childId) => {
-          // Seed the draft BEFORE open() so the child's composer adopts it on
-          // mount (the draft mirror adopts on bind).
-          const scope = sessions.scope(childId)
-          if (scope !== undefined) ctx.conversation.input.for(scope).setDraft(text)
-          sessions.open(childId)
-        })
-        .catch(() => {
-          // Fork or child-title failure leaves the source view unchanged; say
-          // so on the source session's composer instead of failing silently.
-          composerNotice(sessionId, 'error', t('message.rollbackFailed'))
-        })
-    },
+    rollback: (anchorSeq, text) => forkRollbackSession(
+      sessions,
+      sessionId,
+      anchorSeq,
+      text,
+      (scope, draft) => ctx.conversation.input.for(scope).setDraft(draft),
+      failure => composerNotice(
+        sessionId,
+        'error',
+        t(failure === 'fork' ? 'message.rollbackFailed' : 'message.rollbackRestoreFailed'),
+      ),
+    ),
     notifyRollbackBlocked: () => composerNotice(sessionId, 'info', t('message.rollbackBlocked')),
   })
   ctx.slots.inject('conversation.chat.node', () => {

@@ -41,7 +41,7 @@ function render(options: {
   locale?: Record<string, string>
   rollbackWindow?: () => { entries: { seq: number; type: string }[]; hasMore: boolean }
   renderFactorySlot?: (name: string, props: Record<string, unknown>, options?: { fallback?: ReactNode }) => ReactNode
-  rollback?: (anchor: number, text: string) => void
+  rollback?: (anchor: number, text: string) => Promise<void>
   notifyRollbackBlocked?: () => void
 }) {
   const locale = options.locale ?? (en as Record<string, string>)
@@ -57,7 +57,7 @@ function render(options: {
         return template.replace(/\{(\w+)\}/g, (_, name) => String(params?.[name] ?? ''))
       },
       rollbackWindow: options.rollbackWindow ?? (() => ({ entries: [{ seq: 3, type: 'turn/end' }], hasMore: false })),
-      rollback: options.rollback ?? (() => {}),
+      rollback: options.rollback ?? (async () => {}),
       notifyRollbackBlocked: options.notifyRollbackBlocked ?? (() => {}),
     } as never),
   )
@@ -145,7 +145,7 @@ describe('OmUserMessageNodeView', () => {
         },
         t: (key: string) => (en as Record<string, string>)[key] ?? key,
         rollbackWindow: () => ({ entries: [{ seq: 3, type: 'turn/end' }], hasMore: false }),
-        rollback: () => {},
+        rollback: async () => {},
         notifyRollbackBlocked: () => {},
       } as never),
     )
@@ -190,7 +190,7 @@ describe('OmUserMessageNodeView', () => {
         openSkill: () => {},
         t: (key: string) => (en as Record<string, string>)[key] ?? key,
         rollbackWindow: () => ({ entries: [{ seq: 3, type: 'turn/end' }], hasMore: false }),
-        rollback: () => {},
+        rollback: async () => {},
         notifyRollbackBlocked: () => {},
       } as never),
     )

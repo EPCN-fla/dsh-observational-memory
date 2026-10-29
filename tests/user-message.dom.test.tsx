@@ -64,7 +64,7 @@ function mount(options: {
 }) {
   const injected: RollbackInjected = {
     rollbackWindow: () => ({ entries: [], hasMore: false }),
-    rollback: () => {},
+    rollback: async () => {},
     notifyRollbackBlocked: () => {},
     ...options.injected,
   }
@@ -100,7 +100,7 @@ function rollbackButton(): HTMLButtonElement {
 }
 
 describe('OmUserMessageNodeView rollback click', () => {
-  it('renders consecutive messages and rollback through a deferred missing-factory outlet', () => {
+  it('renders consecutive messages and rollback through a deferred missing-factory outlet', async () => {
     // The real host returns a React element immediately; only that element's
     // later render discovers the missing definition. Checking the immediate
     // return for null cannot detect this case.
@@ -117,7 +117,7 @@ describe('OmUserMessageNodeView rollback click', () => {
       })
       expect(container.textContent).toContain(text)
       expect(container.querySelectorAll('button[aria-label="Copy"]')).toHaveLength(1)
-      act(() => { rollbackButton().click() })
+      await act(async () => { rollbackButton().click(); await Promise.resolve() })
       expect(rollback).toHaveBeenLastCalledWith(3, text)
     }
     expect(rollback).toHaveBeenCalledTimes(2)
@@ -131,19 +131,19 @@ describe('OmUserMessageNodeView rollback click', () => {
     expect(rollbackButton().getAttribute('aria-disabled')).toBe('true')
   })
 
-  it('forks at the last turn/end before the durable message seq', () => {
+  it('forks at the last turn/end before the durable message seq', async () => {
     const calls: [number, string][] = []
     mount({
       dataSeq: 11,
       injected: {
-        rollback: (anchor, text) => { calls.push([anchor, text]) },
+        rollback: async (anchor, text) => { calls.push([anchor, text]) },
         rollbackWindow: () => ({
           entries: [{ seq: 0, type: 'turn/start' }, { seq: 3, type: 'turn/end' }, { seq: 10, type: 'turn/start' }],
           hasMore: false,
         }),
       },
     })
-    act(() => { rollbackButton().click() })
+    await act(async () => { rollbackButton().click(); await Promise.resolve() })
     expect(calls).toEqual([[3, 'restore me']])
   })
 
@@ -153,7 +153,7 @@ describe('OmUserMessageNodeView rollback click', () => {
     mount({
       dataSeq: 41,
       injected: {
-        rollback: (...args) => { calls.push(args) },
+        rollback: async (...args) => { calls.push(args) },
         notifyRollbackBlocked: () => { blocked += 1 },
         rollbackWindow: () => ({ entries: [{ seq: 20, type: 'turn/start' }], hasMore: true }),
       },
@@ -163,7 +163,7 @@ describe('OmUserMessageNodeView rollback click', () => {
     expect(blocked).toBe(1)
   })
 
-  it('forks even when older pages stay unloaded (tail-anchored window)', () => {
+  it('forks even when older pages stay unloaded (tail-anchored window)', async () => {
     // Regression: the window of any long session has hasMore=true; an anchor
     // inside the loaded tail must still resolve (no blocked notice).
     const calls: [number, string][] = []
@@ -171,7 +171,7 @@ describe('OmUserMessageNodeView rollback click', () => {
     mount({
       dataSeq: 61,
       injected: {
-        rollback: (anchor, text) => { calls.push([anchor, text]) },
+        rollback: async (anchor, text) => { calls.push([anchor, text]) },
         notifyRollbackBlocked: () => { blocked += 1 },
         rollbackWindow: () => ({
           entries: [{ seq: 50, type: 'turn/start' }, { seq: 53, type: 'turn/end' }, { seq: 60, type: 'turn/start' }],
@@ -179,14 +179,29 @@ describe('OmUserMessageNodeView rollback click', () => {
         }),
       },
     })
-    act(() => { rollbackButton().click() })
+    await act(async () => { rollbackButton().click(); await Promise.resolve() })
     expect(calls).toEqual([[53, 'restore me']])
     expect(blocked).toBe(0)
   })
 
+  it('coalesces repeated clicks while one fork is in flight', async () => {
+    let settle!: () => void
+    const rollback = vi.fn(() => new Promise<void>(resolve => { settle = resolve }))
+    mount({ dataSeq: 11, injected: { rollback, rollbackWindow: () => ({ entries: [{ seq: 3, type: 'turn/end' }], hasMore: false }) } })
+    act(() => { rollbackButton().click() })
+    act(() => { rollbackButton().click() })
+    expect(rollback).toHaveBeenCalledTimes(1)
+    expect(rollbackButton().getAttribute('aria-disabled')).toBe('true')
+    await act(async () => {
+      settle()
+      await Promise.resolve()
+    })
+    expect(rollbackButton().getAttribute('aria-disabled')).toBeNull()
+  })
+
   it('does not fire when disabled (first turn)', () => {
     const calls: unknown[] = []
-    mount({ dataSeq: 1, turn: 0, injected: { rollback: (...args) => { calls.push(args) } } })
+    mount({ dataSeq: 1, turn: 0, injected: { rollback: async (...args) => { calls.push(args) } } })
     expect(rollbackButton().getAttribute('aria-disabled')).toBe('true')
     act(() => { rollbackButton().click() })
     expect(calls).toEqual([])
