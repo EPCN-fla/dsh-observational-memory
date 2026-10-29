@@ -28,8 +28,12 @@ export class DebugLog {
   /** Append one event row; fire-and-forget with contained errors. */
   log(sessionId: string, event: string, data: Record<string, unknown> = {}): void {
     if (!this.rootDir) return
-    const line = `${JSON.stringify({ time: new Date().toISOString(), sessionId, event, ...data })}\n`
-    void this.write(debugLogPath(this.rootDir, sessionId), line)
+    try {
+      const line = `${JSON.stringify({ time: new Date().toISOString(), sessionId, event, ...data })}\n`
+      void this.write(debugLogPath(this.rootDir, sessionId), line)
+    } catch (error) {
+      this.onError(`observational-memory: debug log serialization failed: ${String(error)}`)
+    }
   }
 
   private async write(path: string, line: string): Promise<void> {
