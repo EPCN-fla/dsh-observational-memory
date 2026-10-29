@@ -31,6 +31,8 @@ export class LedgerStore {
   private readonly cache = new Map<string, LedgerEntry[]>()
   private readonly loading = new Map<string, Promise<LedgerEntry[]>>()
   private readonly tails = new Map<string, Promise<void>>()
+  /** Files whose last record is not newline-terminated (or whose last append may be partial). */
+  private readonly unterminated = new Set<string>()
   private ready = false
 
   constructor(
@@ -69,6 +71,7 @@ export class LedgerStore {
         text = await readFile(this.path(sessionId), 'utf8')
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+          this.unterminated.delete(sessionId)
           // Absent file = empty ledger; the deduped `loading` promise keeps
           // concurrent loads sharing this one array.
           return []
@@ -78,6 +81,8 @@ export class LedgerStore {
         this.options.onError?.(`failed to read ledger for session ${sessionId}: ${String(error)}`)
         return this.cache.get(sessionId) ?? []
       }
+      if (text.length > 0 && !text.endsWith('\n')) this.unterminated.add(sessionId)
+      else this.unterminated.delete(sessionId)
       const entries: LedgerEntry[] = []
       for (const line of text.split('\n')) {
         const trimmed = line.trim()
@@ -128,13 +133,22 @@ export class LedgerStore {
     // array before pushing so later loads see the in-memory copy.
     if (!this.cache.has(sessionId)) this.cache.set(sessionId, entries)
     entries.push(...batch)
-    const line = `${batch.map((entry) => JSON.stringify(entry)).join('\n')}\n`
+    // A crash/partial append may leave an unterminated JSON fragment. Start
+    // the next valid record on a fresh line; otherwise the fragment and new
+    // JSON concatenate into another unparseable line and the new record is
+    // lost on the next reload. Preserve the damaged tail for diagnostics.
+    const line = `${this.unterminated.has(sessionId) ? '\n' : ''}${batch.map((entry) => JSON.stringify(entry)).join('\n')}\n`
     const tail = this.tails.get(sessionId) ?? Promise.resolve()
     const next = tail.then(async () => {
       try {
         await this.ensureRoot()
         await appendFile(this.path(sessionId), line, 'utf8')
+        this.unterminated.delete(sessionId)
       } catch (error) {
+        // appendFile can fail after writing a prefix. A leading newline on the
+        // next attempt is harmless when nothing landed and prevents sticking
+        // new JSON onto a partial record when something did.
+        this.unterminated.add(sessionId)
         this.options.onError?.(`failed to persist ledger for session ${sessionId}: ${String(error)}`)
       }
     })
@@ -150,5 +164,6 @@ export class LedgerStore {
   /** Drop the cached copy; the next load re-reads from disk. */
   evict(sessionId: string): void {
     this.cache.delete(sessionId)
+    this.unterminated.delete(sessionId)
   }
 }

@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -86,6 +86,24 @@ describe('LedgerStore', () => {
     const entries = await fresh.load('s1')
     expect(entries).toHaveLength(1)
     expect(errors.length).toBe(2)
+  })
+
+  it('keeps a valid append readable after an unterminated crash tail', async () => {
+    const store = new LedgerStore(dir)
+    await store.append('s1', record('before crash', 1))
+    const file = join(dir, ledgerFileName('s1'))
+    await writeFile(file, `${await readFile(file, 'utf8')}{"kind":`, 'utf8')
+
+    const recovered = new LedgerStore(dir, { onError: () => {} })
+    expect(await recovered.load('s1')).toHaveLength(1)
+    await recovered.append('s1', record('after recovery', 2))
+
+    const fresh = new LedgerStore(dir, { onError: () => {} })
+    const entries = await fresh.load('s1')
+    expect(entries).toHaveLength(2)
+    expect(entries.map(entry => entry.kind === 'observations-recorded' ? entry.observations[0].content : ''))
+      .toEqual(['before crash', 'after recovery'])
+    expect(await readFile(file, 'utf8')).toContain('{"kind":\n{"kind":"observations-recorded"')
   })
 
   it('sanitizes session ids into safe file names', () => {
