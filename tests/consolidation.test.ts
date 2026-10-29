@@ -181,6 +181,59 @@ describe('consolidation pipeline', () => {
     expect(callCount()).toBe(1)
   })
 
+  it('continues past an empty first chunk and records a later chunk in one pass', async () => {
+    resetSeqs()
+    const events = [
+      userEvent(`FIRST ${'a'.repeat(800)}`),
+      userEvent(`SECOND ${'b'.repeat(800)}`),
+    ]
+    const { ctx, callCount, requests } = fakeCtx([
+      { text: 'nothing durable in the first chunk' },
+      {
+        toolCalls: [{
+          id: 'second', name: 'record_observations', arguments: JSON.stringify({ observations: [{
+            timestamp: '2026-01-15 14:30', content: 'The second chunk was observed.', relevance: 'high', sourceEventSeqs: [1],
+          }] }),
+        }],
+      },
+      { text: 'done' },
+    ])
+    const runtime = new OmRuntime(
+      PlainConfig({ observeAfterTokens: 10, reflectAfterTokens: 100_000, observerChunkMaxTokens: 256, storageDir: dir }),
+      { onError: () => {} },
+    )
+    await maybeLaunchConsolidation(ctx, runtime, fakeSession(events))
+    expect(callCount()).toBe(3)
+    expect(JSON.stringify(requests[0].messages)).toContain('FIRST')
+    expect(JSON.stringify(requests[0].messages)).not.toContain('SECOND')
+    expect(JSON.stringify(requests[1].messages)).toContain('SECOND')
+    expect(runtime.store.entries('s1')).toHaveLength(1)
+    expect(runtime.store.entries('s1')[0]).toMatchObject({ kind: 'observations-recorded', coversUpToSeq: 1 })
+  })
+
+  it('does not commit earlier chunks when a later chunk fails', async () => {
+    resetSeqs()
+    const events = [userEvent(`FIRST ${'a'.repeat(800)}`), userEvent(`SECOND ${'b'.repeat(800)}`)]
+    const { ctx } = fakeCtx([
+      {
+        toolCalls: [{
+          id: 'partial', name: 'record_observations', arguments: JSON.stringify({ observations: [{
+            timestamp: '2026-01-15 14:30', content: 'Partial first-chunk result.', relevance: 'medium', sourceEventSeqs: [0],
+          }] }),
+        }],
+      },
+      { text: 'done' },
+      { finish: 'error' },
+    ])
+    const runtime = new OmRuntime(
+      PlainConfig({ observeAfterTokens: 10, reflectAfterTokens: 100_000, observerChunkMaxTokens: 256, storageDir: dir }),
+      { onError: () => {} },
+    )
+    await maybeLaunchConsolidation(ctx, runtime, fakeSession(events))
+    expect(runtime.store.entries('s1')).toHaveLength(0)
+    expect(runtime.lastObserverError.get('s1')).toContain('boom')
+  })
+
   it('keeps the pipeline alive when a worker stream fails', async () => {
     const events = longConversation(20)
     const { ctx, warnings } = fakeCtx([{ finish: 'error' }])

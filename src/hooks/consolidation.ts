@@ -36,7 +36,7 @@ import {
   type Reflection,
 } from '../ledger/index.ts'
 import { resolveObserverChunkMaxTokens, resolveObservationsPoolTargetTokens } from '../config.ts'
-import { serializeSourceAddressedEvents } from '../serialize.ts'
+import { serializeSourceAddressedEventChunks } from '../serialize.ts'
 import type { OmRuntime, ResolveResult } from '../runtime.ts'
 import { runDropper } from '../workers/dropper.ts'
 import { runObserver } from '../workers/observer.ts'
@@ -277,35 +277,41 @@ async function runObserverStage(
   // skips non-source content but needs tool/call events for result labels.
   const backlog = eventsAfter(events, coverageSeq)
   const maxChunkTokens = resolveObserverChunkMaxTokens(config, resolved.contextWindow)
-  const { text: chunk, sourceEventSeqs, estimatedTokens: chunkTokens } = serializeSourceAddressedEvents(backlog, {
-    maxTokens: maxChunkTokens,
-  })
-  if (!chunk.trim() || sourceEventSeqs.length === 0) return
-  const coversUpToSeq = sourceEventSeqs[sourceEventSeqs.length - 1]
+  const chunks = serializeSourceAddressedEventChunks(backlog, { maxTokens: maxChunkTokens })
+  if (chunks.length === 0) return
+  const coversUpToSeq = chunks[chunks.length - 1].sourceEventSeqs.at(-1)
+  if (coversUpToSeq === undefined) return
 
   const memory = fullProjection(entries)
   const priorReflections = memory.reflections.map(reflectionToSummaryLine)
   const priorObservations = memory.observations.map(observationToSummaryLine)
+  const accumulated = new Map<string, (typeof memory.observations)[number]>()
 
-  notify('info', `observer running on ~${chunkTokens.toLocaleString()}-token chunk via ${resolved.target.provider}/${resolved.target.model}`)
-  runtime.debug(sessionId, 'observer.start', {
-    tokens,
-    chunkTokens,
-    coversUpToSeq,
-    sourceEventSeqs,
-    provider: resolved.target.provider,
-    model: resolved.target.model,
-    viaOverride: resolved.viaOverride,
-  })
-
-  const observations = await runObserver(ctx, {
-    target: resolved.target,
-    priorReflections,
-    priorObservations,
-    chunk,
-    allowedSourceEventSeqs: sourceEventSeqs,
-    maxTurns: config.agentMaxTurns,
-  })
+  for (const [index, { text: chunk, sourceEventSeqs, estimatedTokens: chunkTokens }] of chunks.entries()) {
+    notify('info', `observer running on ~${chunkTokens.toLocaleString()}-token chunk ${index + 1}/${chunks.length} via ${resolved.target.provider}/${resolved.target.model}`)
+    runtime.debug(sessionId, 'observer.start', {
+      tokens,
+      chunkTokens,
+      chunkIndex: index + 1,
+      chunkCount: chunks.length,
+      sourceEventSeqs,
+      provider: resolved.target.provider,
+      model: resolved.target.model,
+      viaOverride: resolved.viaOverride,
+    })
+    const observations = await runObserver(ctx, {
+      target: resolved.target,
+      priorReflections,
+      priorObservations: [...priorObservations, ...Array.from(accumulated.values(), observationToSummaryLine)],
+      chunk,
+      allowedSourceEventSeqs: sourceEventSeqs,
+      maxTurns: config.agentMaxTurns,
+    })
+    for (const observation of observations ?? []) {
+      if (!accumulated.has(observation.id)) accumulated.set(observation.id, observation)
+    }
+  }
+  const observations = Array.from(accumulated.values())
   // The model call itself settled: an override-path success re-arms a
   // suspended override, whatever the verdict.
   runtime.noteWorkerSuccess(sessionId, resolved.viaOverride)

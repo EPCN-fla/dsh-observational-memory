@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   estimateEventsTokens,
   renderRecallSourceEvents,
-  serializeSourceAddressedEvents,
+  serializeSourceAddressedEventChunks,
   serializeSourceEvents,
 } from '../src/serialize.ts'
 import {
@@ -55,24 +55,29 @@ describe('serializeSourceEvents', () => {
   })
 })
 
-describe('serializeSourceAddressedEvents', () => {
-  it('labels each event with its source seq and stays under budget', () => {
+describe('serializeSourceAddressedEventChunks', () => {
+  it('labels events and groups them into bounded chunks', () => {
     resetSeqs()
     const events = [userEvent('one'), userEvent('two'), userEvent('three')]
-    const result = serializeSourceAddressedEvents(events, { maxTokens: 24 })
-    expect(result.sourceEventSeqs.length).toBeGreaterThan(0)
-    expect(result.sourceEventSeqs.length).toBeLessThan(3)
-    expect(result.text).toContain(`[Source event seq: ${events[0].seq}]`)
-    expect(result.estimatedTokens).toBeLessThanOrEqual(24 + 4)
+    const chunks = serializeSourceAddressedEventChunks(events, { maxTokens: 24 })
+    expect(chunks.length).toBeGreaterThan(1)
+    expect(chunks.flatMap(chunk => chunk.sourceEventSeqs)).toEqual(events.map(event => event.seq))
+    expect(chunks[0].text).toContain(`[Source event seq: ${events[0].seq}]`)
+    expect(chunks.every(chunk => chunk.estimatedTokens <= 24)).toBe(true)
   })
 
-  it('never stalls on a single oversized first event: emits a marked excerpt', () => {
+  it('splits an oversized event losslessly within every chunk budget', () => {
     resetSeqs()
-    const big = userEvent('x'.repeat(4000))
-    const result = serializeSourceAddressedEvents([big], { maxTokens: 200 })
-    expect(result.sourceEventSeqs).toEqual([big.seq])
-    expect(result.truncatedSourceEventSeqs).toEqual([big.seq])
-    expect(result.text).toContain('middle omitted')
+    const big = userEvent(`HEAD${'a'.repeat(1200)}MIDDLE${'b'.repeat(1200)}TAIL`)
+    const chunks = serializeSourceAddressedEventChunks([big], { maxTokens: 200 })
+    expect(chunks.length).toBeGreaterThan(2)
+    expect(chunks.every(chunk => chunk.estimatedTokens <= 200)).toBe(true)
+    expect(chunks.every(chunk => chunk.sourceEventSeqs.join(',') === String(big.seq))).toBe(true)
+    const text = chunks.map(chunk => chunk.text).join('\n')
+    expect(text).toContain('HEAD')
+    expect(text).toContain('MIDDLE')
+    expect(text).toContain('TAIL')
+    expect(text).not.toContain('middle omitted')
   })
 
   it('estimates token totals for a mixed range', () => {
