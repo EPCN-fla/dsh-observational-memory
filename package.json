@@ -36,8 +36,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "prepack": "node build.mjs",
-    "prepare": "node build.mjs",
+    "prepare": "node -e \"if (require('node:fs').existsSync('build.mjs')) require('node:child_process').execFileSync(process.execPath, ['build.mjs'], { stdio: 'inherit' })\"",
     "test:scripts": "node --test scripts/*.test.mjs",
     "pack:check": "node scripts/package-artifact.mjs",
     "check": "npm run typecheck && npm test && npm run test:scripts && npm run build && npm run pack:check"

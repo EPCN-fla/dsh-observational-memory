@@ -29,6 +29,10 @@ try {
   execFileSync('npm', ['init', '-y'], { cwd: consumer, stdio: 'ignore' })
   execFileSync('npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund', tarball], { cwd: consumer, stdio: 'inherit' })
   const require = createRequire(join(consumer, 'package.json'))
+  // A published prebuilt package has no build.mjs or dev toolchain. Its
+  // prepare script must therefore be a no-op on npm rebuild, while a Git
+  // source checkout (which has build.mjs) still builds during installation.
+  execFileSync('npm', ['rebuild', manifest.name], { cwd: consumer, stdio: 'inherit' })
   const host = await import(pathToFileURL(require.resolve(manifest.name)).href)
   assert.equal(host.name, 'observational-memory')
   const packedClient = await readFile(require.resolve(`${manifest.name}/client`), 'utf8')
