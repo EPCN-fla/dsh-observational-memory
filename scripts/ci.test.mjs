@@ -83,6 +83,8 @@ test('workflow isolates PR validation but gates tag-only publishing on the full 
   assert.deepEqual(workflow.on, { pull_request: null, push: { tags: ['v*'] } })
   assert.equal(workflow.jobs.publish.needs, undefined)
   assert.equal(workflow.jobs.publish.permissions['id-token'], 'write')
+  assert.equal(workflow.jobs.publish.concurrency.group, 'npm-publish-${{ github.repository }}')
+  assert.equal(workflow.jobs.publish.concurrency['cancel-in-progress'], false)
   const steps = workflow.jobs.verify.steps
   assert.match(steps.find(s => s.id === 'verify24').if, /!cancelled\(\)/)
   assert.doesNotMatch(steps.find(s => s.id === 'verify24').if, /verify22|smoke/)

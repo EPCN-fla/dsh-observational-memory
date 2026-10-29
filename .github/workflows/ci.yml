@@ -92,6 +92,11 @@ jobs:
   publish:
     name: release gate + build + npm publish
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    # Serialize every tag in this repository: the registry latest check and
+    # publish are otherwise a cross-tag TOCTOU race that can move latest back.
+    concurrency:
+      group: npm-publish-${{ github.repository }}
+      cancel-in-progress: false
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
