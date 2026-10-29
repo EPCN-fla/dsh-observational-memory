@@ -30,6 +30,14 @@ declare module '@deepseek-ai/dsh-llm' {
   }
 }
 
+/** Thrown when the model still requests tools after the configured turn cap. */
+export class WorkerTurnLimitError extends Error {
+  constructor(readonly maxTurns: number) {
+    super(`worker still requested tool calls after ${maxTurns} turn${maxTurns === 1 ? '' : 's'}; coverage was not advanced`)
+    this.name = 'WorkerTurnLimitError'
+  }
+}
+
 /** Thrown when a worker's model stream ends in error/aborted/max-tokens. */
 export class WorkerStreamError extends Error {
   constructor(
@@ -118,6 +126,11 @@ export async function runWorkerLoop(ctx: Context, options: WorkerLoopOptions): P
     // Execute any tool calls regardless of the finish label: some adapters
     // report 'stop' with calls pending. A call-free response ends the loop.
     if (calls.length === 0) break
+    // A tool call on the last permitted turn means the model never finished
+    // reviewing the chunk. Returning accumulated records here would let the
+    // caller advance coverage past source the model explicitly had not done
+    // with. Fail the run instead so the backlog remains eligible for retry.
+    if (turns >= maxTurns) throw new WorkerTurnLimitError(maxTurns)
 
     for (const call of calls) {
       const tool = options.tools.find((candidate) => candidate.schema.name === call.name)

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { runWorkerLoop, WorkerStreamError } from '../src/workers/loop.ts'
+import { runWorkerLoop, WorkerStreamError, WorkerTurnLimitError } from '../src/workers/loop.ts'
 import { fakeLlmCtx } from './fake-llm.ts'
 
 const echoTool = {
@@ -39,19 +39,18 @@ describe('runWorkerLoop', () => {
     expect(JSON.stringify(toolResult?.content)).toContain('echo: hi')
   })
 
-  it('caps the number of turns', async () => {
+  it('rejects an unfinished tool-call chain at the turn cap', async () => {
     const { ctx, callCount } = fakeLlmCtx([
       { toolCalls: [{ id: 'c1', name: 'echo', arguments: '{"text":"a"}' }] },
     ])
-    const result = await runWorkerLoop(ctx, {
+    await expect(runWorkerLoop(ctx, {
       provider: 'p',
       model: 'm',
       system: 'sys',
       userText: 'user',
       tools: [echoTool],
       maxTurns: 3,
-    })
-    expect(result.turns).toBe(3)
+    })).rejects.toBeInstanceOf(WorkerTurnLimitError)
     expect(callCount()).toBe(3)
   })
 

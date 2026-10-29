@@ -192,6 +192,28 @@ describe('consolidation pipeline', () => {
     expect(warnings.some((m) => m.includes('observer failed'))).toBe(true)
     expect(runtime.store.entries('s1')).toHaveLength(0)
   })
+  it('does not advance coverage when the observer exhausts its turn cap', async () => {
+    const events = longConversation(20)
+    const { ctx } = fakeCtx([{
+      toolCalls: [{
+        id: 'c1',
+        name: 'record_observations',
+        arguments: JSON.stringify({ observations: [{
+          timestamp: '2026-01-15 14:30', content: 'Partial observation.', relevance: 'medium', sourceEventSeqs: [0],
+        }] }),
+      }],
+    }])
+    const runtime = new OmRuntime(
+      PlainConfig({ observeAfterTokens: 10, reflectAfterTokens: 100_000, agentMaxTurns: 1, storageDir: dir }),
+      { onError: () => {} },
+    )
+
+    await maybeLaunchConsolidation(ctx, runtime, fakeSession(events))
+
+    expect(runtime.lastObserverError.get('s1')).toContain('coverage was not advanced')
+    expect(runtime.store.entries('s1')).toHaveLength(0)
+  })
+
   it('warns on consecutive empty observer runs', async () => {
     const events = longConversation(20)
     const { ctx, warnings, infos } = fakeCtx([{ text: 'nothing worth recording' }])
