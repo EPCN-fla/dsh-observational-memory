@@ -107,6 +107,23 @@ function attachedSession(ctx: Context, sessionId: SessionId) {
   return session
 }
 
+type OmRemoteDecorator = <This extends object, Args extends unknown[], Result>(
+  method: (this: This, ...args: Args) => Result,
+  context: ClassMethodDecoratorContext<This, (this: This, ...args: Args) => Result>,
+) => void
+
+/** Session-scoped on DSH ≥0.2.1; legacy Typert accepts only a name string. */
+export function remoteForSession(name: 'status' | 'view' | 'run' | 'logs'): OmRemoteDecorator {
+  try {
+    return (Remote as unknown as (options: {
+      name: string
+      resources: { session: (request: OmSessionRequest) => SessionId }
+    }) => OmRemoteDecorator)({ name, resources: { session: request => request.sessionId } })
+  } catch {
+    return Remote(name) as OmRemoteDecorator
+  }
+}
+
 export class OmApiService extends TypertRemoteService {
   constructor(
     ctx: Context,
@@ -116,7 +133,7 @@ export class OmApiService extends TypertRemoteService {
   }
 
   /** `/om:status` content for one attached session. */
-  @Remote({ name: 'status', resources: { session: request => request.sessionId } })
+  @remoteForSession('status')
   // `signal` is the SRC transport-cancellation parameter (final position).
   async status(request: OmSessionRequest, signal?: AbortSignal): Promise<OmTextValue> {
     const sessionId = sessionIdOf(request)
@@ -154,7 +171,7 @@ export class OmApiService extends TypertRemoteService {
   }
 
   /** `/om:view` content; the ledger alone suffices, attached or not. */
-  @Remote({ name: 'view', resources: { session: request => request.sessionId } })
+  @remoteForSession('view')
   async view(request: OmViewRequest, signal?: AbortSignal): Promise<OmTextValue> {
     const sessionId = sessionIdOf(request)
     // The store is rooted at the configured storageDir: pick up a live
@@ -177,7 +194,7 @@ export class OmApiService extends TypertRemoteService {
    * mode keeps available: it bypasses the passive switch and the token
    * clocks, but not the per-session in-flight guard.
    */
-  @Remote({ name: 'run', resources: { session: request => request.sessionId } })
+  @remoteForSession('run')
   async run(request: OmSessionRequest, signal?: AbortSignal): Promise<OmRunValue> {
     const sessionId = sessionIdOf(request)
     const session = attachedSession(this.ctx, sessionId)
@@ -187,7 +204,7 @@ export class OmApiService extends TypertRemoteService {
   }
 
   /** Bounded tail of the session's debug NDJSON, when recording is on. */
-  @Remote({ name: 'logs', resources: { session: request => request.sessionId } })
+  @remoteForSession('logs')
   async logs(request: OmLogsRequest, signal?: AbortSignal): Promise<OmLogsValue> {
     const sessionId = sessionIdOf(request)
     this.runtime.refreshConfig()
