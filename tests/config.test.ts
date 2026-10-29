@@ -137,7 +137,7 @@ describe('live (volatile) configuration', () => {
     if (!supportsVolatile) {
       // DSH 0.1.5 / Schemastery 3.18.2: the legacy settings transport consumes
       // plain values and must not receive a fabricated ref shape.
-      expect(wrapped.observeAfterTokens).toBe(10_000)
+      expect(wrapped.observeAfterTokens).toBe(5000)
       return
     }
     for (const [key, value] of Object.entries(wrapped)) {
