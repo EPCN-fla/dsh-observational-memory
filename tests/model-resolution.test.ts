@@ -62,6 +62,25 @@ describe('OmRuntime.resolveModel override suspension', () => {
     expect(warnings.filter((message) => message.includes('suspended'))).toHaveLength(1)
   })
 
+  it('retries transient context-window failures instead of caching them forever', async () => {
+    const runtime = new OmRuntime(PlainConfig({ storageDir: dir }), { onError: () => {} })
+    let calls = 0
+    const ctx = {
+      llm: {
+        resolveModelInfo: async () => {
+          calls++
+          if (calls === 1) throw new Error('adapter is still starting')
+          return { context: { contextWindow: 128_000 } }
+        },
+      },
+    } as unknown as Context
+
+    expect(await runtime.sessionContextWindow(ctx, session, undefined)).toBeUndefined()
+    expect(await runtime.sessionContextWindow(ctx, session, undefined)).toBe(128_000)
+    expect(await runtime.sessionContextWindow(ctx, session, undefined)).toBe(128_000)
+    expect(calls).toBe(2)
+  })
+
   it('memoizes session context windows per route', async () => {
     const runtime = new OmRuntime(PlainConfig({ storageDir: dir }), { onError: () => {} })
     const calls: string[] = []

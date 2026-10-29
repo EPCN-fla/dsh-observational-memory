@@ -77,9 +77,10 @@ export class OmRuntime {
    * Context-window lookups per route. The host re-calls the adapter on every
    * resolveModelInfo, and ratio mode resolves on every idle event and status
    * poll; route windows are static for the adapter's lifetime, so cache both
-   * hits and (as undefined) unresolvable routes.
+   * hits. Failures and missing windows are deliberately not cached: an adapter
+   * that is still starting must be retried on the next idle/status pass.
    */
-  private readonly contextWindowCache = new Map<string, number | undefined>()
+  private readonly contextWindowCache = new Map<string, number>()
 
   constructor(initialConfig: Config, hooks: { onError: (message: string) => void }) {
     this._config = resolveConfig(initialConfig)
@@ -314,8 +315,11 @@ export class OmRuntime {
     } catch {
       window = undefined
     }
-    this.contextWindowCache.set(key, window)
-    return window
+    if (typeof window === 'number' && Number.isFinite(window) && window > 0) {
+      this.contextWindowCache.set(key, window)
+      return window
+    }
+    return undefined
   }
 
   /**
