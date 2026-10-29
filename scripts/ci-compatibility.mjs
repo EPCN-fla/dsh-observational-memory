@@ -18,8 +18,15 @@ export function readCompatibility(path = 'package.json') {
     if (!exactVersion.test(version)) throw new Error('dshCompatibility keys must be exact DSH versions, not ranges or tags')
     if (!config || typeof config !== 'object' || Array.isArray(config)
       || typeof config.cordis !== 'string' || !/^~?\d+\.\d+\.\d+$/.test(config.cordis)
-      || Object.keys(config).some(key => key !== 'cordis')) {
-      throw new Error(`dshCompatibility ${version} requires a cordis version (exact or tilde)`)
+      || typeof config.schemastery !== 'string' || !exactVersion.test(config.schemastery)
+      || Object.keys(config).some(key => !['cordis', 'schemastery', 'overrides'].includes(key))) {
+      throw new Error(`dshCompatibility ${version} requires exact cordis/schemastery versions and optional exact overrides`)
+    }
+    if (config.overrides !== undefined) {
+      if (!config.overrides || typeof config.overrides !== 'object' || Array.isArray(config.overrides)
+        || Object.entries(config.overrides).some(([name, pinned]) => !name || typeof pinned !== 'string' || !exactVersion.test(pinned))) {
+        throw new Error(`dshCompatibility ${version} overrides must map package names to exact versions`)
+      }
     }
   }
   return { manifest, entries }
@@ -43,6 +50,16 @@ function main() {
     }
     if (dependencies['@deepseek-ai/cordis'] !== entries[version].cordis) {
       dependencies['@deepseek-ai/cordis'] = entries[version].cordis
+      changed = true
+    }
+    if (dependencies['@deepseek-ai/schemastery'] !== entries[version].schemastery) {
+      dependencies['@deepseek-ai/schemastery'] = entries[version].schemastery
+      changed = true
+    }
+    const overrides = entries[version].overrides ?? {}
+    if (JSON.stringify(manifest.overrides ?? {}) !== JSON.stringify(overrides)) {
+      if (Object.keys(overrides).length === 0) delete manifest.overrides
+      else manifest.overrides = overrides
       changed = true
     }
     if (changed) writeFileSync('package.json', `${JSON.stringify(manifest, null, 2)}\n`)

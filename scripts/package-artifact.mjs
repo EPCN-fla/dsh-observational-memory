@@ -23,15 +23,21 @@ try {
   execFileSync('npm', ['init', '-y'], { cwd: consumer, stdio: 'ignore' })
   const cohort = process.env.DSH_TEST_VERSION
   const cohortArgs = []
+  const selected = cohort === undefined ? undefined : manifest.dshCompatibility?.[cohort]
   if (cohort !== undefined) {
-    const selected = manifest.dshCompatibility?.[cohort]
     assert.ok(selected, `DSH_TEST_VERSION ${cohort} is not declared in dshCompatibility`)
     for (const name of Object.keys(manifest.devDependencies)) {
       if (name.startsWith('@deepseek-ai/dsh-')) cohortArgs.push(`${name}@${cohort}`)
     }
-    cohortArgs.push(`@deepseek-ai/cordis@${selected.cordis}`)
+    cohortArgs.push(`@deepseek-ai/cordis@${selected.cordis}`, `@deepseek-ai/schemastery@${selected.schemastery}`)
+    if (selected.overrides !== undefined) {
+      const consumerManifestPath = join(consumer, 'package.json')
+      const consumerManifest = JSON.parse(await readFile(consumerManifestPath, 'utf8'))
+      consumerManifest.overrides = selected.overrides
+      await writeFile(consumerManifestPath, `${JSON.stringify(consumerManifest, null, 2)}\n`)
+    }
   }
-  execFileSync('npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund', tarball, ...cohortArgs], { cwd: consumer, stdio: 'inherit' })
+  execFileSync('npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund', '--save-exact', tarball, ...cohortArgs], { cwd: consumer, stdio: 'inherit' })
   const require = createRequire(join(consumer, 'package.json'))
   // A published prebuilt package has no build.mjs or dev toolchain. Its
   // prepare script must therefore be a no-op on npm rebuild, while a Git

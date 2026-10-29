@@ -33,20 +33,33 @@ test('compatibility matrix is derived from metadata and selects only DSH/Cordis 
     const selected = JSON.parse(readFileSync(join(root, 'package.json')))
     for (const [name, value] of Object.entries(manifest.devDependencies)) {
       assert.equal(selected.devDependencies[name], name.startsWith('@deepseek-ai/dsh-') ? version
-        : name === '@deepseek-ai/cordis' ? manifest.dshCompatibility[version].cordis : value)
+        : name === '@deepseek-ai/cordis' ? manifest.dshCompatibility[version].cordis
+        : name === '@deepseek-ai/schemastery' ? manifest.dshCompatibility[version].schemastery : value)
     }
     assert.deepEqual(selected.peerDependencies, manifest.peerDependencies)
+    assert.deepEqual(selected.overrides ?? {}, manifest.dshCompatibility[version].overrides ?? {})
     assert.equal(run(root, 'ci-compatibility.mjs', ['select', version]).stdout.trim(), 'changed=false')
   }
   assert.notEqual(run(root, 'ci-compatibility.mjs', ['select', 'latest']).status, 0)
 }))
 
 test('compatibility reader rejects empty, ranged and malformed metadata', () => fixture(root => {
-  for (const entries of [undefined, {}, [], { latest: { cordis: '4.0.5' } }, { '0.2.0-rc.1': { cordis: '*' } }]) {
+  for (const entries of [undefined, {}, [], { latest: { cordis: '4.0.5', schemastery: '3.18.4' } }, { '0.2.0-rc.1': { cordis: '*', schemastery: '3.18.4' } }, { '0.2.0-rc.1': { cordis: '4.0.4', schemastery: '3.18.4', overrides: { x: '*' } } }]) {
     writeFileSync(join(root, 'package.json'), JSON.stringify({ dshCompatibility: entries }))
     assert.throws(() => readCompatibility(join(root, 'package.json')))
   }
 }))
+
+test('every published host in the peer compatibility window has an executable matrix entry', () => {
+  assert.deepEqual(Object.keys(manifest.dshCompatibility), [
+    '0.1.5-rc.2', '0.1.5-rc.3',
+    '0.1.7-rc.1', '0.1.7-rc.2',
+    '0.2.0-rc.1', '0.2.0-rc.2',
+    '0.2.1-rc.1', '0.2.1-rc.2', '0.2.1-rc.3', '0.2.1-rc.4',
+  ])
+  // 0.1.5-rc.4 remains in the peer declaration but was never published to npm.
+  assert.equal(manifest.dshCompatibility['0.1.5-rc.4'], undefined)
+})
 
 test('every executable matrix version remains inside every DSH peer range', () => {
   for (const version of Object.keys(manifest.dshCompatibility)) {
