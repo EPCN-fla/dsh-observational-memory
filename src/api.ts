@@ -29,7 +29,7 @@ interface TokenMeterLike {
 }
 
 export interface OmSessionRequest {
-  sessionId: string
+  sessionId: SessionId
 }
 
 export interface OmViewRequest extends OmSessionRequest {
@@ -91,7 +91,7 @@ function sessionIdOf(request: OmSessionRequest): SessionId {
   if (typeof request?.sessionId !== 'string' || request.sessionId.length === 0) {
     throw new RemoteError('gateway/bad-request', 'sessionId must be a non-empty string', {})
   }
-  return request.sessionId as SessionId
+  return request.sessionId
 }
 
 /** Attached session, or a domain error the tab renders as-is. */
@@ -116,7 +116,7 @@ export class OmApiService extends TypertRemoteService {
   }
 
   /** `/om:status` content for one attached session. */
-  @Remote('status')
+  @Remote({ name: 'status', resources: { session: request => request.sessionId } })
   // `signal` is the SRC transport-cancellation parameter (final position).
   async status(request: OmSessionRequest, signal?: AbortSignal): Promise<OmTextValue> {
     const sessionId = sessionIdOf(request)
@@ -154,7 +154,7 @@ export class OmApiService extends TypertRemoteService {
   }
 
   /** `/om:view` content; the ledger alone suffices, attached or not. */
-  @Remote('view')
+  @Remote({ name: 'view', resources: { session: request => request.sessionId } })
   async view(request: OmViewRequest, signal?: AbortSignal): Promise<OmTextValue> {
     const sessionId = sessionIdOf(request)
     // The store is rooted at the configured storageDir: pick up a live
@@ -177,7 +177,7 @@ export class OmApiService extends TypertRemoteService {
    * mode keeps available: it bypasses the passive switch and the token
    * clocks, but not the per-session in-flight guard.
    */
-  @Remote('run')
+  @Remote({ name: 'run', resources: { session: request => request.sessionId } })
   async run(request: OmSessionRequest, signal?: AbortSignal): Promise<OmRunValue> {
     const sessionId = sessionIdOf(request)
     const session = attachedSession(this.ctx, sessionId)
@@ -187,7 +187,7 @@ export class OmApiService extends TypertRemoteService {
   }
 
   /** Bounded tail of the session's debug NDJSON, when recording is on. */
-  @Remote('logs')
+  @Remote({ name: 'logs', resources: { session: request => request.sessionId } })
   async logs(request: OmLogsRequest, signal?: AbortSignal): Promise<OmLogsValue> {
     const sessionId = sessionIdOf(request)
     this.runtime.refreshConfig()
