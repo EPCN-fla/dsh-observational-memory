@@ -163,7 +163,7 @@ describe('consolidation pipeline', () => {
     expect(drop.observationIds).toEqual([secondId])
   })
 
-  it('backs off after a deliberate empty observer run', async () => {
+  it('advances coverage after a deliberate empty observer run', async () => {
     const events = longConversation(20)
     const { ctx, callCount } = fakeCtx([{ text: 'nothing worth recording' }])
     const runtime = new OmRuntime(PlainConfig({ observeAfterTokens: 10, reflectAfterTokens: 100_000, storageDir: dir }), {
@@ -173,9 +173,10 @@ describe('consolidation pipeline', () => {
 
     await maybeLaunchConsolidation(ctx, runtime, session)
     expect(callCount()).toBe(1)
-    expect(runtime.store.entries('s1')).toHaveLength(0)
+    expect(runtime.store.entries('s1')).toHaveLength(1)
+    expect(runtime.store.entries('s1')[0]).toMatchObject({ observations: [], coversUpToSeq: events.length - 1 })
 
-    // Same span, no new tokens: the backoff suppresses a re-fire.
+    // The scanned span is covered, so it is not scanned again.
     await maybeLaunchConsolidation(ctx, runtime, session)
     expect(callCount()).toBe(1)
   })
@@ -222,12 +223,12 @@ describe('consolidation pipeline', () => {
     })
 
     await maybeLaunchConsolidation(ctx, runtime, fakeSession(events))
-    expect(runtime.store.entries('s1')).toHaveLength(0)
+    expect(runtime.store.entries('s1')).toHaveLength(1)
     expect(infos.some((m) => m.includes('found nothing new'))).toBe(true)
     expect(warnings.some((m) => m.includes('consecutive runs'))).toBe(false)
 
-    // The backoff lifts once another observeAfterTokens worth of source text
-    // accumulates; a second consecutive empty verdict escalates to a warning.
+    // New source after the scan watermark is a new chunk; a second
+    // consecutive empty verdict escalates to a warning.
     const more = [...events, userEvent('extra source text to clear the backoff, deliberately long enough to pass the ten-token gate', events.length)]
     await maybeLaunchConsolidation(ctx, runtime, fakeSession(more))
     expect(warnings.some((m) => m.includes('2 consecutive runs'))).toBe(true)
@@ -493,7 +494,7 @@ describe('manual consolidation run (Memory tab "run now")', () => {
     expect(runtime.store.entries('s1')).toHaveLength(2)
   })
 
-  it('is the explicit retry that bypasses the deliberate-empty backoff', async () => {
+  it('spends no second model call after an empty scan advanced coverage', async () => {
     const events = longConversation(20)
     const { ctx, callCount } = fakeCtx([{ text: 'nothing worth recording' }])
     const runtime = new OmRuntime(PlainConfig({ observeAfterTokens: 10, reflectAfterTokens: 100_000, storageDir: dir }), {
@@ -503,12 +504,9 @@ describe('manual consolidation run (Memory tab "run now")', () => {
 
     await maybeLaunchConsolidation(ctx, runtime, session)
     expect(callCount()).toBe(1)
-    // Same span: the backoff suppresses the automatic re-fire…
-    await maybeLaunchConsolidation(ctx, runtime, session)
-    expect(callCount()).toBe(1)
-    // …but the manual run ignores it.
     await expect(runConsolidationNow(ctx, runtime, session)).resolves.toBe(true)
-    expect(callCount()).toBe(2)
+    expect(callCount()).toBe(1)
+    expect(runtime.store.entries('s1')).toHaveLength(1)
   })
 
   it('refuses subagent sessions, which have no memory of their own', async () => {

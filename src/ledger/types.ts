@@ -157,7 +157,8 @@ export function isObservationsRecordedRecord(value: unknown): value is Observati
   return (
     value.kind === 'observations-recorded' &&
     Array.isArray(value.observations) &&
-    value.observations.length > 0 &&
+    // Empty batches are deliberate scan-only coverage records: they let the
+    // observer advance past a chunk with nothing durable to record.
     value.observations.every(isObservation) &&
     isSeq(value.coversUpToSeq)
   )
@@ -230,4 +231,10 @@ export function buildObservationsDropped(
 ): ObservationsDroppedRecord | undefined {
   if (observationIds.length === 0 || !isSeq(coversUpToSeq)) return undefined
   return { kind: 'observations-dropped', observationIds, coversUpToSeq }
+}
+
+/** Record a completed scan that deliberately produced no observations. */
+export function buildObservationsScanned(coversUpToSeq: number): ObservationsRecordedRecord | undefined {
+  if (!isSeq(coversUpToSeq)) return undefined
+  return { kind: 'observations-recorded', observations: [], coversUpToSeq }
 }

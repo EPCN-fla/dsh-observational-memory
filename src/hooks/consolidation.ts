@@ -22,6 +22,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import {
   buildObservationsDropped,
   buildObservationsRecorded,
+  buildObservationsScanned,
   buildReflectionsRecorded,
   foldLedger,
   fullProjection,
@@ -270,21 +271,6 @@ async function runObserverStage(
 
   const coverageSeq = latestCoverageSeq(entries, 'observations-recorded')
 
-  // Deliberate-empty backoff: an intentional "nothing to record" verdict must
-  // not re-fire every turn over the same span; retry after another
-  // observeAfterTokens worth of source text, and drop the backoff as soon as
-  // coverage advances. A manual run is the user's explicit retry, so it
-  // ignores the backoff.
-  const backoff = runtime.observerEmptyBackoff.get(sessionId)
-  if (!options.force && backoff) {
-    if (coverageSeq !== backoff.coverageSeq || tokens >= backoff.tokensAtEmpty + config.observeAfterTokens) {
-      runtime.observerEmptyBackoff.delete(sessionId)
-    } else {
-      runtime.debug(sessionId, 'observer.empty_backoff', { tokens })
-      return
-    }
-  }
-
   const resolved = await resolveModel()
 
   // The full post-watermark range (not just source events): the serializer
@@ -325,20 +311,20 @@ async function runObserverStage(
   runtime.noteWorkerSuccess(sessionId, resolved.viaOverride)
 
   if (!observations || observations.length === 0) {
-    runtime.observerEmptyBackoff.set(sessionId, { coverageSeq, tokensAtEmpty: tokens })
+    // A call-free verdict is an intentional "nothing durable here" scan, not
+    // a worker failure. Persist its coverage so the next run advances to the
+    // next chunk instead of starving all later source behind an empty head.
+    const scanned = buildObservationsScanned(coversUpToSeq)
+    if (scanned) await runtime.store.append(sessionId, scanned)
     const streak = runtime.noteObserverEmpty(sessionId)
     runtime.debug(sessionId, 'observer.empty', { coversUpToSeq, consecutiveEmpties: streak })
-    // A first empty verdict can be legitimate ("nothing worth recording");
-    // consecutive empties over a growing backlog usually mean the worker
-    // model is not following the record_observations tool contract — warn.
     if (streak >= 2) {
       notify('warning', `observer returned no observations in ${streak} consecutive runs; the worker model may not be calling the record_observations tool`)
     } else {
-      notify('info', 'observer found nothing new in this chunk (coverage unchanged; will retry later)')
+      notify('info', 'observer found nothing new in this chunk; coverage advanced')
     }
     return
   }
-  runtime.observerEmptyBackoff.delete(sessionId)
   runtime.clearObserverEmpties(sessionId)
 
   const record = buildObservationsRecorded(observations, coversUpToSeq)

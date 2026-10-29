@@ -28,12 +28,6 @@ export type ResolveResult =
     }
   | { ok: false; reason: string }
 
-/** Deliberate-empty observer backoff state for one session. */
-export type EmptyBackoff = {
-  coverageSeq: number
-  tokensAtEmpty: number
-}
-
 /** Storage root for ledgers and debug logs. */
 export function storageRoot(config: ResolvedConfig): string {
   const configured = config.storageDir
@@ -118,7 +112,6 @@ export class OmRuntime {
   readonly lastObserverError = new Map<string, string>()
   readonly lastReflectorError = new Map<string, string>()
   readonly lastDropperError = new Map<string, string>()
-  readonly observerEmptyBackoff = new Map<string, EmptyBackoff>()
   /** Sessions already notified about model resolution failure (notify once). */
   readonly resolveFailureNotified = new Set<string>()
   /**
@@ -274,7 +267,6 @@ export class OmRuntime {
    */
   clearSession(sessionId: string): void {
     this.clearStageErrors(sessionId)
-    this.observerEmptyBackoff.delete(sessionId)
     this.resolveFailureNotified.delete(sessionId)
     this.workerConsecutiveFailures.delete(sessionId)
     this.overrideSuspensionNotified.delete(sessionId)
