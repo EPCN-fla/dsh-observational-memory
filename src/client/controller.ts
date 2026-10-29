@@ -199,6 +199,8 @@ export interface FieldDef {
   min?: number
   /** Maximum accepted value for numeric fields. */
   max?: number
+  /** Require an integer, matching the Host schema's step(1) fields. */
+  integer?: boolean
   /** Treat min/max as exclusive bounds (e.g. a ratio strictly inside (0, 1)). */
   exclusive?: boolean
   /** Accepted values for choice fields. */
@@ -255,15 +257,15 @@ const MODEL_KEYS = ['model.provider', 'model.id', 'model.reasoningEffort'] as co
 
 /** Every field the card edits, in display order. */
 export const CARD_FIELDS: FieldDef[] = [
-  { key: 'observeAfterTokens', kind: 'number', min: 1 },
-  { key: 'reflectAfterTokens', kind: 'number', min: 1 },
-  { key: 'observerChunkMaxTokens', kind: 'number', min: 256 },
-  { key: 'compactAfterTokens', kind: 'number', min: 0 },
+  { key: 'observeAfterTokens', kind: 'number', integer: true, min: 1 },
+  { key: 'reflectAfterTokens', kind: 'number', integer: true, min: 1 },
+  { key: 'observerChunkMaxTokens', kind: 'number', integer: true, min: 256 },
+  { key: 'compactAfterTokens', kind: 'number', integer: true, min: 0 },
   { key: 'compactAfterTokensMode', kind: 'choice', options: ['calibrated', 'ratio'] },
   { key: 'compactAfterTokensRatio', kind: 'number', min: 0, max: 1, exclusive: true },
-  { key: 'observationsPoolMaxTokens', kind: 'number', min: 1 },
-  { key: 'observationsPoolTargetTokens', kind: 'number', min: 1 },
-  { key: 'agentMaxTurns', kind: 'number', min: 1 },
+  { key: 'observationsPoolMaxTokens', kind: 'number', integer: true, min: 1 },
+  { key: 'observationsPoolTargetTokens', kind: 'number', integer: true, min: 1 },
+  { key: 'agentMaxTurns', kind: 'number', integer: true, min: 1 },
   { key: 'passive', kind: 'boolean' },
   { key: 'showWorkerNotifications', kind: 'boolean' },
   { key: 'debugLog', kind: 'boolean' },
@@ -271,7 +273,7 @@ export const CARD_FIELDS: FieldDef[] = [
   { key: 'model.provider', kind: 'text' },
   { key: 'model.id', kind: 'text' },
   { key: 'model.reasoningEffort', kind: 'text' },
-  { key: 'modelFallbackAfterFailures', kind: 'number', min: 0 },
+  { key: 'modelFallbackAfterFailures', kind: 'number', integer: true, min: 0 },
 ]
 
 function readPath(source: unknown, key: string): unknown {
@@ -461,7 +463,7 @@ export class OmCardController {
     if (trimmed === '') return 'clear'
     if (spec?.kind === 'number') {
       const parsed = Number(trimmed)
-      if (!Number.isFinite(parsed)) return undefined
+      if (!Number.isFinite(parsed) || (spec.integer === true && !Number.isInteger(parsed))) return undefined
       if (spec.min !== undefined && (spec.exclusive ? parsed <= spec.min : parsed < spec.min)) return undefined
       if (spec.max !== undefined && (spec.exclusive ? parsed >= spec.max : parsed > spec.max)) return undefined
       return 'set'

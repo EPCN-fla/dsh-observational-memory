@@ -144,6 +144,19 @@ describe('OmCardController', () => {
     expect(state().dirty).toBe(true) // still staged — nothing was written
   })
 
+  it('rejects fractional integer fields before any Host write but allows ratios', async () => {
+    const scope = fakeScope({})
+    const { face, state } = makeController(scope)
+    face.edit('observeAfterTokens', '1.5')
+    expect(state().fields.observeAfterTokens.invalid).toBe(true)
+    expect(state().invalid).toBe(true)
+    face.edit('compactAfterTokensRatio', '0.5')
+    expect(state().fields.compactAfterTokensRatio.invalid).toBe(false)
+    face.save()
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(scope.getSnapshot().user).toEqual({})
+  })
+
   it('writes staged values on save and clears staging after acceptance', async () => {
     const scope = fakeScope({})
     const { face, state } = makeController(scope)
