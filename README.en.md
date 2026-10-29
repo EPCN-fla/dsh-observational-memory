@@ -62,6 +62,7 @@ The correspondence matrix between plugin versions and DSH versions is as follows
 | Plugin version | Compatible DSH versions |
 | --- | --- |
 | 0.4.2 | >=0.1.5-rc.2 <0.1.5 \|\| >=0.1.7-rc.1 <0.1.7 \|\| >=0.2.0-rc.1 <0.2.0 \|\| >=0.2.1-rc.1 <0.2.1 |
+| 0.4.1 | >=0.1.5-rc.2 <0.1.5 \|\| >=0.1.7-rc.1 <0.1.7 \|\| >=0.2.0-rc.1 <0.2.0 \|\| >=0.2.1-rc.1 <0.2.1 |
 | 0.4.0 | >=0.1.5-rc.2 <0.1.5 \|\| >=0.1.7-rc.1 <0.1.7 \|\| >=0.2.0-rc.1 <0.2.0 \|\| >=0.2.1-rc.1 <0.2.1 |
 | 0.3.0 | >=0.1.5-rc.2 <0.1.5 \|\| >=0.1.7-rc.1 <0.1.7 \|\| >=0.2.0-rc.1 <0.2.0 |
 | 0.2.0 | >=0.1.5-rc.2 <0.1.5 \|\| 0.1.7-rc.1 |
@@ -131,7 +132,7 @@ The tab fetches once when opened and then only on the Refresh button — no poll
 
 ### The recall tool
 
-The agent can call `recall(id)` with a 12-character lowercase hex memory id to recover the exact source evidence (timestamped original text) behind an observation or reflection. It is an exact lookup, not search: the model cites ids it saw in compacted memory.
+The agent can call `recall(id)` with a 12-character lowercase hex memory id to recover the exact source evidence (timestamped original text) behind an observation or reflection. It is an exact lookup, not search: the model cites ids it saw in compacted memory. Results are paged at 50,000 characters; a truncated result includes the offset for the following `recall(id, offset)` call.
 
 ### The rollback button
 
@@ -143,10 +144,10 @@ DSH can only cut sessions at turn boundaries, so the button stays disabled (with
 
 ## Configuration
 
-Configuration lives in its own `observational-memory` namespace of the DSH user settings document (default `$DSH_HOME/settings.yaml`) — never in the harness's own composition. Two ways to edit:
+Configuration uses its own `observational-memory` namespace, isolated from the rest of the harness. DSH ≥0.1.7 persists the user layer in the active Profile's `cordis.patch.yml`; DSH ≤0.1.5 uses `$DSH_HOME/settings.yaml`, which is imported on the first upgraded start. Two ways to edit:
 
-1. **UI**: see "The settings card" above.
-2. **File**: edit the `observational-memory:` section of `$DSH_HOME/settings.yaml` by hand.
+1. **UI (recommended)**: see "The settings card" above; the host writes the correct location for its version.
+2. **File**: on DSH ≥0.1.7 edit the plugin row's `config:` in the active Profile's `cordis.patch.yml`; on DSH ≤0.1.5 edit the `observational-memory:` section of `$DSH_HOME/settings.yaml`.
 
 ### Settings
 
@@ -167,6 +168,8 @@ Configuration lives in its own `observational-memory` namespace of the DSH user 
 | `passive` | `false` | Passive mode: disable all proactive background triggers (the Memory tab's **Run now**, manual/DSH compaction and recall stay available) |
 | `debugLog` | `false` | Write per-session NDJSON debug events under the storage directory |
 | `storageDir` | `$DSH_HOME/observational-memory` | Ledger storage root |
+
+Each worker run also has a 120-second overall deadline; timeout or cancellation never advances coverage. Transient automatic-task failures retry with bounded per-session exponential backoff without waiting for another turn. Success, passive mode, session disposal and plugin unload clear retry state.
 
 ### Storage format
 
