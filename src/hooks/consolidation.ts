@@ -101,11 +101,14 @@ export async function maybeLaunchConsolidation(ctx: Context, runtime: OmRuntime,
   const config = runtime.config
   if (config.passive) return
   const sessionId: string = session.id
-  if (runtime.consolidationInFlight.has(sessionId)) return
-  // Claim the slot atomically — no await between the check and the add — so
-  // concurrent turn/end and agent/created triggers cannot double-run the
-  // pipeline. (ensureInherited above already awaited; do not insert one here.)
-  runtime.consolidationInFlight.add(sessionId)
+  // Coalesce (rather than drop) a trigger that arrives during an active run.
+  // The active snapshot predates this event, so its owner performs one
+  // trailing due-check with the latest session after settling.
+  const owner = runtime.claimConsolidation(sessionId)
+  if (owner === undefined) {
+    runtime.consolidationPending.set(sessionId, session)
+    return
+  }
   try {
     const entries = await runtime.store.load(sessionId)
     const events = session.snapshotEvents()
@@ -116,8 +119,13 @@ export async function maybeLaunchConsolidation(ctx: Context, runtime: OmRuntime,
     runtime.clearStageErrors(sessionId)
     await runConsolidationPipeline(ctx, runtime, session)
   } finally {
-    runtime.consolidationInFlight.delete(sessionId)
+    const released = runtime.releaseConsolidation(sessionId, owner)
     releaseDisposedSession(ctx, runtime, session)
+    const pending = released ? runtime.consolidationPending.get(sessionId) : undefined
+    if (pending !== undefined) {
+      runtime.consolidationPending.delete(sessionId)
+      launch(ctx, runtime, pending)
+    }
   }
 }
 
@@ -153,18 +161,23 @@ export async function runConsolidationNow(ctx: Context, runtime: OmRuntime, sess
   runtime.refreshConfig()
   if (session.header.origin === 'subagent') return false
   const sessionId: string = session.id
-  if (runtime.consolidationInFlight.has(sessionId)) return false
   // Claim the slot synchronously — before the first await — so a double
   // click cannot double-run the pipeline.
-  runtime.consolidationInFlight.add(sessionId)
+  const owner = runtime.claimConsolidation(sessionId)
+  if (owner === undefined) return false
   try {
     await runtime.ensureInherited(ctx, session)
     runtime.clearStageErrors(sessionId)
     await runConsolidationPipeline(ctx, runtime, session, { force: true })
     return true
   } finally {
-    runtime.consolidationInFlight.delete(sessionId)
+    const released = runtime.releaseConsolidation(sessionId, owner)
     releaseDisposedSession(ctx, runtime, session)
+    const pending = released ? runtime.consolidationPending.get(sessionId) : undefined
+    if (pending !== undefined) {
+      runtime.consolidationPending.delete(sessionId)
+      launch(ctx, runtime, pending)
+    }
   }
 }
 

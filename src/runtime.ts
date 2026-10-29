@@ -50,6 +50,26 @@ export class OmRuntime {
 
   /** Sessions with a consolidation pipeline currently running. */
   readonly consolidationInFlight = new Set<string>()
+  private readonly consolidationOwners = new Map<string, symbol>()
+  /** Latest automatic trigger coalesced while a session pipeline is active. */
+  readonly consolidationPending = new Map<string, Session>()
+  /** Claim one session pipeline; only the returned owner may release it. */
+  claimConsolidation(sessionId: string): symbol | undefined {
+    if (this.consolidationOwners.has(sessionId)) return undefined
+    const owner = Symbol(sessionId)
+    this.consolidationOwners.set(sessionId, owner)
+    this.consolidationInFlight.add(sessionId)
+    return owner
+  }
+
+  /** Release only the owner's slot; a stale task cannot unlock a newer run. */
+  releaseConsolidation(sessionId: string, owner: symbol): boolean {
+    if (this.consolidationOwners.get(sessionId) !== owner) return false
+    this.consolidationOwners.delete(sessionId)
+    this.consolidationInFlight.delete(sessionId)
+    return true
+  }
+
   /** Sessions with a proactive compaction currently in flight. */
   readonly compactInFlight = new Set<string>()
   /** Fork-ledger inheritance runs in flight, deduped per session. */
@@ -219,8 +239,10 @@ export class OmRuntime {
     this.workerConsecutiveFailures.delete(sessionId)
     this.overrideSuspensionNotified.delete(sessionId)
     this.observerConsecutiveEmpties.delete(sessionId)
-    this.compactInFlight.delete(sessionId)
-    this.consolidationInFlight.delete(sessionId)
+    // Active task slots are owner-managed. Clearing them here would let a
+    // same-id reattach run concurrently with the old task; their finally
+    // blocks release them after the work actually settles.
+    this.consolidationPending.delete(sessionId)
   }
 
   /**

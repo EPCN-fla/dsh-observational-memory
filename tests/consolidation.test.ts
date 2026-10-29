@@ -523,6 +523,69 @@ describe('manual consolidation run (Memory tab "run now")', () => {
   })
 })
 
+describe('consolidation scheduling', () => {
+  it('coalesces an automatic trigger received during a run into a trailing pass', async () => {
+    const events = longConversation(20)
+    const recordTurn = (id: string, seq: number, content: string) => ({
+      toolCalls: [{
+        id,
+        name: 'record_observations',
+        arguments: JSON.stringify({ observations: [{
+          timestamp: '2026-01-15 14:30', content, relevance: 'medium', sourceEventSeqs: [seq],
+        }] }),
+      }],
+    })
+    const newSeq = events.length
+    const { ctx, callCount } = fakeCtx([
+      recordTurn('c1', 0, 'First snapshot.'),
+      { text: 'done' },
+      recordTurn('c2', newSeq, 'Arrived while the first run was active.'),
+      { text: 'done' },
+    ])
+    const runtime = new OmRuntime(
+      PlainConfig({ observeAfterTokens: 10, reflectAfterTokens: 100_000, storageDir: dir }),
+      { onError: () => {} },
+    )
+    const session = fakeSession(events)
+    const originalStream = ctx.llm.stream
+    let streamCalls = 0
+    let releaseFirst!: () => void
+    const firstGate = new Promise<void>(resolve => { releaseFirst = resolve })
+    ctx.llm.stream = async function* (options: unknown) {
+      streamCalls++
+      if (streamCalls === 1) await firstGate
+      yield* originalStream(options)
+    }
+
+    const first = maybeLaunchConsolidation(ctx, runtime, session)
+    await vi.waitFor(() => expect(streamCalls).toBe(1))
+    events.push(userEvent('new source that must not be stranded', newSeq))
+    await maybeLaunchConsolidation(ctx, runtime, session)
+    expect(runtime.consolidationPending.has('s1')).toBe(true)
+    releaseFirst()
+    await first
+
+    await vi.waitFor(() => expect(callCount()).toBe(4))
+    await vi.waitFor(() => expect(runtime.consolidationInFlight.size).toBe(0))
+    expect(runtime.store.entries('s1').map(entry => entry.kind === 'observations-recorded' ? entry.coversUpToSeq : -1))
+      .toEqual([events.length - 2, newSeq])
+  })
+
+  it('keeps active slots owned across disposal cleanup and rejects stale releases', () => {
+    const runtime = new OmRuntime(PlainConfig({ storageDir: dir }), { onError: () => {} })
+    const first = runtime.claimConsolidation('s1')!
+    runtime.clearSession('s1')
+    expect(runtime.consolidationInFlight.has('s1')).toBe(true)
+    expect(runtime.claimConsolidation('s1')).toBeUndefined()
+    expect(runtime.releaseConsolidation('s1', first)).toBe(true)
+
+    const second = runtime.claimConsolidation('s1')!
+    expect(runtime.releaseConsolidation('s1', first)).toBe(false)
+    expect(runtime.consolidationInFlight.has('s1')).toBe(true)
+    expect(runtime.releaseConsolidation('s1', second)).toBe(true)
+  })
+})
+
 describe('consolidation triggers', () => {
   it('subscribes to agent/created (agent/session-start was removed in DSH 0.1.6) and launches on creation', async () => {
     const events = longConversation(20)
