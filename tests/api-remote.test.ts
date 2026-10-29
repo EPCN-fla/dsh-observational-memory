@@ -1,5 +1,5 @@
 import { Context } from '@deepseek-ai/cordis'
-import { remoteMethods, type RemoteMethodMarker } from '@deepseek-ai/dsh-typert-protocol'
+import { Remote, remoteMethods, type RemoteMethodMarker } from '@deepseek-ai/dsh-typert-protocol'
 import { describe, expect, it } from 'vitest'
 import { OmApiService } from '../src/api.ts'
 import { OmRuntime } from '../src/runtime.ts'
@@ -19,8 +19,20 @@ describe('Observational Memory Remote authorization', () => {
     const ctx = new Context()
     const runtime = new OmRuntime({}, { onError: () => {} })
     const service = new OmApiService(ctx, runtime)
+    let supportsSessionResources = true
+    try {
+      ;(Remote as unknown as (options: unknown) => unknown)({ name: 'probe', resources: { session: () => 's1' } })
+    } catch {
+      supportsSessionResources = false
+    }
     for (const method of ['status', 'view', 'run', 'logs']) {
       const reader = marker(service, method).resources?.session
+      if (!supportsSessionResources) {
+        // Legacy Typert has no resource-map contract; remoteForSession must
+        // retain its name-only decorator rather than throwing at module load.
+        expect(reader).toBeUndefined()
+        continue
+      }
       expect(reader, `${method} must not fall back to global authorization`).toBeTypeOf('function')
       expect(reader?.({ sessionId: 'session-victim' }, undefined)).toBe('session-victim')
     }

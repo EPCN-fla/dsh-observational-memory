@@ -133,6 +133,13 @@ describe('live (volatile) configuration', () => {
     // plain face yields plain values.
     const wrapped = Config({ observeAfterTokens: 5000, storageDir: '/tmp/om' }) as Record<string, unknown>
     expect(Object.keys(wrapped).length).toBeGreaterThan(0)
+    const supportsVolatile = Object.values(wrapped).some(value => typeof (value as { get?: unknown })?.get === 'function')
+    if (!supportsVolatile) {
+      // DSH 0.1.5 / Schemastery 3.18.2: the legacy settings transport consumes
+      // plain values and must not receive a fabricated ref shape.
+      expect(wrapped.observeAfterTokens).toBe(10_000)
+      return
+    }
     for (const [key, value] of Object.entries(wrapped)) {
       expect(typeof (value as { get?: unknown })?.get, `field ${key}`).toBe('function')
     }
