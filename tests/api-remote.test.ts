@@ -4,7 +4,11 @@ import { describe, expect, it } from 'vitest'
 import { OmApiService } from '../src/api.ts'
 import { OmRuntime } from '../src/runtime.ts'
 
-function marker(service: object, method: string): RemoteMethodMarker {
+type SessionMarker = RemoteMethodMarker & {
+  resources?: Record<string, (...args: unknown[]) => unknown>
+}
+
+function marker(service: object, method: string): SessionMarker {
   const found = remoteMethods(service).find(candidate => candidate.method === method)
   if (!found) throw new Error(`missing Remote marker for ${method}`)
   return found
