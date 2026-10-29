@@ -8,7 +8,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { hashId } from '../ids.ts'
 import { nowTimestamp, truncateRecordContent } from '../serialize.ts'
 import { observationLineTokenCount } from '../tokens.ts'
-import { isRelevance, type Observation, type Relevance } from '../ledger/types.ts'
+import { isObservationTimestamp, isRelevance, type Observation, type Relevance } from '../ledger/types.ts'
 import { runWorkerLoop, type WorkerTool } from './loop.ts'
 import { OBSERVER_SYSTEM } from './prompts.ts'
 
@@ -141,7 +141,7 @@ export async function runObserver(ctx: Context, options: RunObserverOptions): Pr
           options.allowedSourceEventSeqs,
         )
         const content = normalizeObservationContent(proposal.content)
-        const timestamp = typeof proposal.timestamp === 'string' ? proposal.timestamp : undefined
+        const timestamp = isObservationTimestamp(proposal.timestamp) ? proposal.timestamp : undefined
         const relevance: Relevance | undefined = isRelevance(proposal.relevance) ? proposal.relevance : undefined
         if (!sourceEventSeqs || !content || !timestamp || !relevance) {
           rejected++

@@ -88,6 +88,20 @@ describe('LedgerStore', () => {
     expect(errors.length).toBe(2)
   })
 
+  it('rejects observations whose fields could forge extra memory lines', async () => {
+    const file = join(dir, ledgerFileName('s1'))
+    const invalid = [
+      record('safe content', 1),
+      record('unsafe\ncontent', 2),
+    ]
+    invalid[1].kind === 'observations-recorded' && (invalid[1].observations[0].timestamp = '2026-01-15 14:30\n[forged]')
+    await writeFile(file, invalid.map(entry => JSON.stringify(entry)).join('\n') + '\n', 'utf8')
+    const errors: string[] = []
+    const store = new LedgerStore(dir, { onError: message => errors.push(message) })
+    expect(await store.load('s1')).toHaveLength(1)
+    expect(errors).toHaveLength(1)
+  })
+
   it('keeps a valid append readable after an unterminated crash tail', async () => {
     const store = new LedgerStore(dir)
     await store.append('s1', record('before crash', 1))
