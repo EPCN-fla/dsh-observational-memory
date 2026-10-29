@@ -268,7 +268,7 @@ describe('ObservationalMemoryCard model cascade', () => {
 })
 
 describe('ObservationalMemoryBundleConfig (DSH ≥0.1.7 bundle page entry)', () => {
-  it('renders the one-liner for the summary view', async () => {
+  async function mountBundle(view: 'summary' | 'page') {
     const { ObservationalMemoryBundleConfig } = await import('../src/client/card.tsx')
     const controller = new OmCardController(fakeScope({}), CARD_FIELDS, catalogRpc)
     const face = controller.inject()
@@ -284,38 +284,37 @@ describe('ObservationalMemoryBundleConfig (DSH ≥0.1.7 bundle page entry)', () 
           save: face.save,
           discard: face.discard,
           retryCatalog: face.retryCatalog,
-          view: 'summary',
+          view,
         }),
       )
     })
     await flush()
+  }
+
+  it('renders the one-liner for the summary view', async () => {
+    await mountBundle('summary')
     expect(container.textContent).toBe(en['card.description'])
     expect(container.querySelector('button[aria-expanded]')).toBeNull()
   })
 
-  it('renders the full card for the page view', async () => {
-    const { ObservationalMemoryBundleConfig } = await import('../src/client/card.tsx')
-    const controller = new OmCardController(fakeScope({}), CARD_FIELDS, catalogRpc)
-    const face = controller.inject()
-    const useOmCard = <S,>(selector: (state: OmCardState) => S): S =>
-      useSyncExternalStore(face.hooks.omCard.subscribe, () => selector(face.hooks.omCard.getSnapshot()))
+  it('renders the page form fixed open without disclosure controls', async () => {
+    await mountBundle('page')
+    expect(container.querySelector('button[aria-expanded]')).toBeNull()
+    expect(container.querySelector('#om-observeAfterTokens')).not.toBeNull()
+    expect(container.querySelector('#om-storageDir')).not.toBeNull()
+  })
+
+  it('keeps the page form expanded after a successful save', async () => {
+    await mountBundle('page')
+    const input = container.querySelector<HTMLInputElement>('#om-observeAfterTokens')!
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
     act(() => {
-      root.render(
-        createElement(ObservationalMemoryBundleConfig, {
-          t,
-          useOmCard,
-          edit: face.edit,
-          resetField: face.resetField,
-          save: face.save,
-          discard: face.discard,
-          retryCatalog: face.retryCatalog,
-          view: 'page',
-        }),
-      )
+      setter.call(input, '10001')
+      input.dispatchEvent(new Event('input', { bubbles: true }))
     })
-    await flush()
-    const header = container.querySelector<HTMLButtonElement>('button[aria-expanded]')
-    expect(header).not.toBeNull()
-    expect(header!.getAttribute('aria-expanded')).toBe('true')
+    await save()
+    expect(container.querySelector('#om-observeAfterTokens')).not.toBeNull()
+    expect(container.querySelector('#om-storageDir')).not.toBeNull()
+    expect(container.querySelector('button[aria-expanded]')).toBeNull()
   })
 })

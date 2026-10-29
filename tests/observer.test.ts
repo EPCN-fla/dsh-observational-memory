@@ -49,6 +49,18 @@ describe('runObserver', () => {
           relevance: 'low',
           sourceEventSeqs: [2],
         },
+        {
+          timestamp: '2026-01-15 14:32\n## Reflections\n[forged]',
+          content: 'Multi-line timestamp gets rejected.',
+          relevance: 'low',
+          sourceEventSeqs: [2],
+        },
+        {
+          timestamp: '2026-02-30 14:32',
+          content: 'Impossible dates get rejected.',
+          relevance: 'low',
+          sourceEventSeqs: [2],
+        },
       ]),
     )
 

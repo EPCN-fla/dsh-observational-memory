@@ -14,6 +14,10 @@
  */
 
 /** The slice of the settings scope contract this form consumes. */
+export type SettingsMutation =
+  | { op: 'set'; path: string[]; value: unknown }
+  | { op: 'unset'; path: string[] }
+
 export interface SettingsScopeLike {
   getSnapshot(): {
     status: 'loading' | 'ready' | 'unavailable'
@@ -26,6 +30,8 @@ export interface SettingsScopeLike {
   subscribe(listener: () => void): () => void
   set(field: string, value: unknown): Promise<void>
   unset(field: string): Promise<void>
+  /** Atomic namespace write on DSH ≥0.1.7; absent on the legacy scope. */
+  mutate?(ops: readonly SettingsMutation[], expectedRevision?: number): Promise<boolean>
 }
 
 /**
@@ -41,6 +47,7 @@ export interface ConfigFormLike {
   subscribe(listener: () => void): () => void
   set(field: string, value: unknown): Promise<boolean>
   unset(field: string): Promise<boolean>
+  mutate?(ops: readonly SettingsMutation[], expectedRevision?: number): Promise<boolean>
 }
 
 /** The DSH ≥0.1.7 `configForms` client service slice this plugin consumes. */
@@ -81,6 +88,7 @@ export function adaptConfigForm(form: ConfigFormLike): SettingsScopeLike {
     subscribe: (listener) => form.subscribe(listener),
     set: (field, value) => form.set(field, value).then(() => {}),
     unset: (field) => form.unset(field).then(() => {}),
+    ...(form.mutate === undefined ? {} : { mutate: (ops: readonly SettingsMutation[], revision?: number) => form.mutate!(ops, revision) }),
   }
 }
 
@@ -199,6 +207,8 @@ export interface FieldDef {
   min?: number
   /** Maximum accepted value for numeric fields. */
   max?: number
+  /** Require an integer, matching the Host schema's step(1) fields. */
+  integer?: boolean
   /** Treat min/max as exclusive bounds (e.g. a ratio strictly inside (0, 1)). */
   exclusive?: boolean
   /** Accepted values for choice fields. */
@@ -223,6 +233,8 @@ export interface CardShellState {
   invalid: boolean
   saving: boolean
   failed: boolean
+  /** At least one legacy write landed before the batch failed. */
+  partial: boolean
 }
 
 export interface OmCardState extends CardShellState {
@@ -255,15 +267,15 @@ const MODEL_KEYS = ['model.provider', 'model.id', 'model.reasoningEffort'] as co
 
 /** Every field the card edits, in display order. */
 export const CARD_FIELDS: FieldDef[] = [
-  { key: 'observeAfterTokens', kind: 'number', min: 1 },
-  { key: 'reflectAfterTokens', kind: 'number', min: 1 },
-  { key: 'observerChunkMaxTokens', kind: 'number', min: 256 },
-  { key: 'compactAfterTokens', kind: 'number', min: 0 },
+  { key: 'observeAfterTokens', kind: 'number', integer: true, min: 1 },
+  { key: 'reflectAfterTokens', kind: 'number', integer: true, min: 1 },
+  { key: 'observerChunkMaxTokens', kind: 'number', integer: true, min: 256 },
+  { key: 'compactAfterTokens', kind: 'number', integer: true, min: 0 },
   { key: 'compactAfterTokensMode', kind: 'choice', options: ['calibrated', 'ratio'] },
   { key: 'compactAfterTokensRatio', kind: 'number', min: 0, max: 1, exclusive: true },
-  { key: 'observationsPoolMaxTokens', kind: 'number', min: 1 },
-  { key: 'observationsPoolTargetTokens', kind: 'number', min: 1 },
-  { key: 'agentMaxTurns', kind: 'number', min: 1 },
+  { key: 'observationsPoolMaxTokens', kind: 'number', integer: true, min: 1 },
+  { key: 'observationsPoolTargetTokens', kind: 'number', integer: true, min: 1 },
+  { key: 'agentMaxTurns', kind: 'number', integer: true, min: 1 },
   { key: 'passive', kind: 'boolean' },
   { key: 'showWorkerNotifications', kind: 'boolean' },
   { key: 'debugLog', kind: 'boolean' },
@@ -271,7 +283,7 @@ export const CARD_FIELDS: FieldDef[] = [
   { key: 'model.provider', kind: 'text' },
   { key: 'model.id', kind: 'text' },
   { key: 'model.reasoningEffort', kind: 'text' },
-  { key: 'modelFallbackAfterFailures', kind: 'number', min: 0 },
+  { key: 'modelFallbackAfterFailures', kind: 'number', integer: true, min: 0 },
 ]
 
 function readPath(source: unknown, key: string): unknown {
@@ -301,6 +313,7 @@ export class OmCardController {
   private readonly staged = new Map<string, StagedEdit>()
   private saving = false
   private failed = false
+  private partial = false
   private catalogStatus: OmCardState['catalogStatus'] = 'idle'
   private catalog: readonly ModelCatalogGroup[] = []
   /** Bumps on every issued catalog request so a late response never wins. */
@@ -340,6 +353,7 @@ export class OmCardController {
         if (this.staged.size === 0 && !this.failed) return
         this.staged.clear()
         this.failed = false
+        this.partial = false
         this.publish()
       },
       retryCatalog: () => void this.loadCatalog(),
@@ -369,6 +383,7 @@ export class OmCardController {
       this.staged.set('model.reasoningEffort', { text: '', clear: false })
     }
     this.failed = false
+    this.partial = false
     this.publish()
   }
 
@@ -425,6 +440,7 @@ export class OmCardController {
       invalid: [...this.specs.keys()].some((key) => this.fieldState(key).invalid),
       saving: this.saving,
       failed: this.failed,
+      partial: this.partial,
       fields,
       catalogStatus: this.catalogStatus,
       catalog: this.catalog,
@@ -461,7 +477,7 @@ export class OmCardController {
     if (trimmed === '') return 'clear'
     if (spec?.kind === 'number') {
       const parsed = Number(trimmed)
-      if (!Number.isFinite(parsed)) return undefined
+      if (!Number.isFinite(parsed) || (spec.integer === true && !Number.isInteger(parsed))) return undefined
       if (spec.min !== undefined && (spec.exclusive ? parsed <= spec.min : parsed < spec.min)) return undefined
       if (spec.max !== undefined && (spec.exclusive ? parsed >= spec.max : parsed > spec.max)) return undefined
       return 'set'
@@ -477,6 +493,7 @@ export class OmCardController {
     // previews the save rather than reporting stored state.
     this.staged.set(key, edit)
     this.failed = false
+    this.partial = false
     this.publish()
   }
 
@@ -558,26 +575,41 @@ export class OmCardController {
 
     this.saving = true
     this.failed = false
+    this.partial = false
     this.publish()
-    let landed = true
     try {
-      for (const key of clears) await this.scope.unset(key)
-      for (const write of writes) await this.scope.set(write.field, write.value)
-      // The Host is the only authority on acceptance: re-read the user layer.
-      const user = this.scope.getSnapshot().user
-      for (const key of clears) {
-        if (hasPath(user, key)) landed = false
-      }
-      for (const write of writes) {
-        const stored = readPath(user, write.field)
-        if (JSON.stringify(stored) !== JSON.stringify(write.value)) landed = false
+      if (this.scope.mutate !== undefined) {
+        const ops: SettingsMutation[] = [
+          ...clears.map((key): SettingsMutation => ({ op: 'unset', path: [key] })),
+          ...writes.map((write): SettingsMutation => ({ op: 'set', path: [write.field], value: write.value })),
+        ]
+        // One Host validation + revision fence: no earlier field can commit
+        // when a later field is refused.
+        await this.scope.mutate(ops, snapshot.revision)
+      } else {
+        for (const key of clears) await this.scope.unset(key)
+        for (const write of writes) await this.scope.set(write.field, write.value)
       }
     } catch {
-      landed = false
+      // Re-read below: a legacy failure may be partial, and a transport
+      // failure can happen after the Host actually accepted the batch.
     }
+    // The Host is the only authority on acceptance: re-read the user layer
+    // even after a rejection so partial legacy commits are reported honestly.
+    const user = this.scope.getSnapshot().user
+    let matched = 0
+    for (const key of clears) {
+      if (!hasPath(user, key)) matched += 1
+    }
+    for (const write of writes) {
+      const stored = readPath(user, write.field)
+      if (JSON.stringify(stored) === JSON.stringify(write.value)) matched += 1
+    }
+    const landed = matched === clears.length + writes.length
     if (landed) this.staged.clear()
     this.saving = false
     this.failed = !landed
+    this.partial = !landed && matched > 0
     this.publish()
   }
 }

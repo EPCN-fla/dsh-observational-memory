@@ -53,6 +53,7 @@ export const zh = {
   'action.reset': '重置为默认',
   'state.unsaved': '未保存',
   'state.saveFailed': '配置未被接受；已保留你的修改供更正。',
+  'state.savePartial': '部分配置已保存，其余未被接受；草稿已保留，请核对后重试。',
   'state.readOnly': '当前部署的设置是只读的。',
   'state.overridden': '已覆盖',
   'state.expand': '展开设置',
@@ -80,6 +81,7 @@ export const zh = {
   'memory.loading': '加载中…',
   'memory.error': '加载失败',
   'memory.runFailed': '运行失败',
+  'memory.runSkipped': '未执行：另一个记忆任务正在运行，或此会话不支持独立记忆。',
   'memory.empty.status': '暂无状态信息。',
   'memory.empty.content': '该会话还没有记忆内容。',
   'memory.empty.logs': '该会话还没有调试日志。',
@@ -96,6 +98,7 @@ export const zh = {
   'message.rollbackUnavailable': '仅可回退带文本、且无附件的非首轮消息',
   'message.rollbackBlocked': '回退点不在已加载的历史范围内；请先向上滚动加载更早的消息。',
   'message.rollbackFailed': '回退失败：未能分叉会话。',
+  'message.rollbackRestoreFailed': '回退分支已创建，但无法恢复原消息或打开分支。',
 } as const
 
 export type LocaleKey = keyof typeof zh
@@ -147,6 +150,7 @@ export const en: Record<LocaleKey, string> = {
   'action.reset': 'Reset to default',
   'state.unsaved': 'Unsaved',
   'state.saveFailed': 'The deployment did not accept these values; they were left for you to correct.',
+  'state.savePartial': 'Some settings were saved, but the rest were not accepted. Review the retained drafts before retrying.',
   'state.readOnly': 'This deployment stores settings read-only.',
   'state.overridden': 'Overridden',
   'state.expand': 'Show settings',
@@ -174,6 +178,7 @@ export const en: Record<LocaleKey, string> = {
   'memory.loading': 'Loading…',
   'memory.error': 'Load failed',
   'memory.runFailed': 'Run failed',
+  'memory.runSkipped': 'Not run: another memory task is active, or this session does not own independent memory.',
   'memory.empty.status': 'No status available.',
   'memory.empty.content': 'This session has no memory content yet.',
   'memory.empty.logs': 'No debug events recorded for this session yet.',
@@ -190,4 +195,5 @@ export const en: Record<LocaleKey, string> = {
   'message.rollbackUnavailable': 'Only text-only messages past the first turn can roll back',
   'message.rollbackBlocked': 'The rollback point is outside the loaded history; scroll up to load older messages first.',
   'message.rollbackFailed': 'Rollback failed: the session could not be forked.',
+  'message.rollbackRestoreFailed': 'The rollback branch was created, but the original message could not be restored or opened.',
 }

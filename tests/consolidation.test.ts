@@ -163,7 +163,7 @@ describe('consolidation pipeline', () => {
     expect(drop.observationIds).toEqual([secondId])
   })
 
-  it('backs off after a deliberate empty observer run', async () => {
+  it('advances coverage after a deliberate empty observer run', async () => {
     const events = longConversation(20)
     const { ctx, callCount } = fakeCtx([{ text: 'nothing worth recording' }])
     const runtime = new OmRuntime(PlainConfig({ observeAfterTokens: 10, reflectAfterTokens: 100_000, storageDir: dir }), {
@@ -173,11 +173,65 @@ describe('consolidation pipeline', () => {
 
     await maybeLaunchConsolidation(ctx, runtime, session)
     expect(callCount()).toBe(1)
-    expect(runtime.store.entries('s1')).toHaveLength(0)
+    expect(runtime.store.entries('s1')).toHaveLength(1)
+    expect(runtime.store.entries('s1')[0]).toMatchObject({ observations: [], coversUpToSeq: events.length - 1 })
 
-    // Same span, no new tokens: the backoff suppresses a re-fire.
+    // The scanned span is covered, so it is not scanned again.
     await maybeLaunchConsolidation(ctx, runtime, session)
     expect(callCount()).toBe(1)
+  })
+
+  it('continues past an empty first chunk and records a later chunk in one pass', async () => {
+    resetSeqs()
+    const events = [
+      userEvent(`FIRST ${'a'.repeat(800)}`),
+      userEvent(`SECOND ${'b'.repeat(800)}`),
+    ]
+    const { ctx, callCount, requests } = fakeCtx([
+      { text: 'nothing durable in the first chunk' },
+      {
+        toolCalls: [{
+          id: 'second', name: 'record_observations', arguments: JSON.stringify({ observations: [{
+            timestamp: '2026-01-15 14:30', content: 'The second chunk was observed.', relevance: 'high', sourceEventSeqs: [1],
+          }] }),
+        }],
+      },
+      { text: 'done' },
+    ])
+    const runtime = new OmRuntime(
+      PlainConfig({ observeAfterTokens: 10, reflectAfterTokens: 100_000, observerChunkMaxTokens: 256, storageDir: dir }),
+      { onError: () => {} },
+    )
+    await maybeLaunchConsolidation(ctx, runtime, fakeSession(events))
+    expect(callCount()).toBe(3)
+    expect(JSON.stringify(requests[0].messages)).toContain('FIRST')
+    expect(JSON.stringify(requests[0].messages)).not.toContain('SECOND')
+    expect(JSON.stringify(requests[1].messages)).toContain('SECOND')
+    expect(runtime.store.entries('s1')).toHaveLength(1)
+    expect(runtime.store.entries('s1')[0]).toMatchObject({ kind: 'observations-recorded', coversUpToSeq: 1 })
+  })
+
+  it('does not commit earlier chunks when a later chunk fails', async () => {
+    resetSeqs()
+    const events = [userEvent(`FIRST ${'a'.repeat(800)}`), userEvent(`SECOND ${'b'.repeat(800)}`)]
+    const { ctx } = fakeCtx([
+      {
+        toolCalls: [{
+          id: 'partial', name: 'record_observations', arguments: JSON.stringify({ observations: [{
+            timestamp: '2026-01-15 14:30', content: 'Partial first-chunk result.', relevance: 'medium', sourceEventSeqs: [0],
+          }] }),
+        }],
+      },
+      { text: 'done' },
+      { finish: 'error' },
+    ])
+    const runtime = new OmRuntime(
+      PlainConfig({ observeAfterTokens: 10, reflectAfterTokens: 100_000, observerChunkMaxTokens: 256, storageDir: dir }),
+      { onError: () => {} },
+    )
+    await maybeLaunchConsolidation(ctx, runtime, fakeSession(events))
+    expect(runtime.store.entries('s1')).toHaveLength(0)
+    expect(runtime.lastObserverError.get('s1')).toContain('boom')
   })
 
   it('keeps the pipeline alive when a worker stream fails', async () => {
@@ -192,6 +246,28 @@ describe('consolidation pipeline', () => {
     expect(warnings.some((m) => m.includes('observer failed'))).toBe(true)
     expect(runtime.store.entries('s1')).toHaveLength(0)
   })
+  it('does not advance coverage when the observer exhausts its turn cap', async () => {
+    const events = longConversation(20)
+    const { ctx } = fakeCtx([{
+      toolCalls: [{
+        id: 'c1',
+        name: 'record_observations',
+        arguments: JSON.stringify({ observations: [{
+          timestamp: '2026-01-15 14:30', content: 'Partial observation.', relevance: 'medium', sourceEventSeqs: [0],
+        }] }),
+      }],
+    }])
+    const runtime = new OmRuntime(
+      PlainConfig({ observeAfterTokens: 10, reflectAfterTokens: 100_000, agentMaxTurns: 1, storageDir: dir }),
+      { onError: () => {} },
+    )
+
+    await maybeLaunchConsolidation(ctx, runtime, fakeSession(events))
+
+    expect(runtime.lastObserverError.get('s1')).toContain('coverage was not advanced')
+    expect(runtime.store.entries('s1')).toHaveLength(0)
+  })
+
   it('warns on consecutive empty observer runs', async () => {
     const events = longConversation(20)
     const { ctx, warnings, infos } = fakeCtx([{ text: 'nothing worth recording' }])
@@ -200,12 +276,12 @@ describe('consolidation pipeline', () => {
     })
 
     await maybeLaunchConsolidation(ctx, runtime, fakeSession(events))
-    expect(runtime.store.entries('s1')).toHaveLength(0)
+    expect(runtime.store.entries('s1')).toHaveLength(1)
     expect(infos.some((m) => m.includes('found nothing new'))).toBe(true)
     expect(warnings.some((m) => m.includes('consecutive runs'))).toBe(false)
 
-    // The backoff lifts once another observeAfterTokens worth of source text
-    // accumulates; a second consecutive empty verdict escalates to a warning.
+    // New source after the scan watermark is a new chunk; a second
+    // consecutive empty verdict escalates to a warning.
     const more = [...events, userEvent('extra source text to clear the backoff, deliberately long enough to pass the ten-token gate', events.length)]
     await maybeLaunchConsolidation(ctx, runtime, fakeSession(more))
     expect(warnings.some((m) => m.includes('2 consecutive runs'))).toBe(true)
@@ -471,7 +547,7 @@ describe('manual consolidation run (Memory tab "run now")', () => {
     expect(runtime.store.entries('s1')).toHaveLength(2)
   })
 
-  it('is the explicit retry that bypasses the deliberate-empty backoff', async () => {
+  it('spends no second model call after an empty scan advanced coverage', async () => {
     const events = longConversation(20)
     const { ctx, callCount } = fakeCtx([{ text: 'nothing worth recording' }])
     const runtime = new OmRuntime(PlainConfig({ observeAfterTokens: 10, reflectAfterTokens: 100_000, storageDir: dir }), {
@@ -481,12 +557,9 @@ describe('manual consolidation run (Memory tab "run now")', () => {
 
     await maybeLaunchConsolidation(ctx, runtime, session)
     expect(callCount()).toBe(1)
-    // Same span: the backoff suppresses the automatic re-fire…
-    await maybeLaunchConsolidation(ctx, runtime, session)
-    expect(callCount()).toBe(1)
-    // …but the manual run ignores it.
     await expect(runConsolidationNow(ctx, runtime, session)).resolves.toBe(true)
-    expect(callCount()).toBe(2)
+    expect(callCount()).toBe(1)
+    expect(runtime.store.entries('s1')).toHaveLength(1)
   })
 
   it('refuses subagent sessions, which have no memory of their own', async () => {
@@ -498,6 +571,134 @@ describe('manual consolidation run (Memory tab "run now")', () => {
     await expect(runConsolidationNow(ctx, runtime, subagent)).resolves.toBe(false)
     expect(callCount()).toBe(0)
     expect(runtime.consolidationInFlight.size).toBe(0)
+  })
+})
+
+describe('consolidation scheduling', () => {
+  it('coalesces an automatic trigger received during a run into a trailing pass', async () => {
+    const events = longConversation(20)
+    const recordTurn = (id: string, seq: number, content: string) => ({
+      toolCalls: [{
+        id,
+        name: 'record_observations',
+        arguments: JSON.stringify({ observations: [{
+          timestamp: '2026-01-15 14:30', content, relevance: 'medium', sourceEventSeqs: [seq],
+        }] }),
+      }],
+    })
+    const newSeq = events.length
+    const { ctx, callCount } = fakeCtx([
+      recordTurn('c1', 0, 'First snapshot.'),
+      { text: 'done' },
+      recordTurn('c2', newSeq, 'Arrived while the first run was active.'),
+      { text: 'done' },
+    ])
+    const runtime = new OmRuntime(
+      PlainConfig({ observeAfterTokens: 10, reflectAfterTokens: 100_000, storageDir: dir }),
+      { onError: () => {} },
+    )
+    const session = fakeSession(events)
+    const originalStream = ctx.llm.stream
+    let streamCalls = 0
+    let releaseFirst!: () => void
+    const firstGate = new Promise<void>(resolve => { releaseFirst = resolve })
+    ctx.llm.stream = async function* (options: unknown) {
+      streamCalls++
+      if (streamCalls === 1) await firstGate
+      yield* originalStream(options)
+    }
+
+    const first = maybeLaunchConsolidation(ctx, runtime, session)
+    await vi.waitFor(() => expect(streamCalls).toBe(1))
+    events.push(userEvent('new source that must not be stranded', newSeq))
+    await maybeLaunchConsolidation(ctx, runtime, session)
+    expect(runtime.consolidationPending.has('s1')).toBe(true)
+    releaseFirst()
+    await first
+
+    await vi.waitFor(() => expect(callCount()).toBe(4))
+    await vi.waitFor(() => expect(runtime.consolidationInFlight.size).toBe(0))
+    expect(runtime.store.entries('s1').map(entry => entry.kind === 'observations-recorded' ? entry.coversUpToSeq : -1))
+      .toEqual([events.length - 2, newSeq])
+  })
+
+  it('retries a failed automatic pass without requiring another session event', async () => {
+    vi.useFakeTimers()
+    const runtime = new OmRuntime(
+      PlainConfig({ observeAfterTokens: 10, reflectAfterTokens: 100_000, storageDir: dir }),
+      { onError: () => {} },
+    )
+    try {
+      const events = longConversation(20)
+      const { ctx, callCount } = fakeCtx([
+        { finish: 'error' },
+        {
+          toolCalls: [{
+            id: 'retry', name: 'record_observations', arguments: JSON.stringify({ observations: [{
+              timestamp: '2026-01-15 14:30', content: 'Recovered after a transient failure.', relevance: 'high', sourceEventSeqs: [0],
+            }] }),
+          }],
+        },
+        { text: 'done' },
+      ])
+      await maybeLaunchConsolidation(ctx, runtime, fakeSession(events))
+      expect(callCount()).toBe(1)
+      expect(runtime.store.entries('s1')).toHaveLength(0)
+
+      await vi.advanceTimersByTimeAsync(1_000)
+      await vi.waitFor(() => expect(callCount()).toBe(3))
+      await vi.waitFor(() => expect(runtime.consolidationInFlight.size).toBe(0))
+      expect(runtime.store.entries('s1')).toHaveLength(1)
+      expect(runtime.lastObserverError.has('s1')).toBe(false)
+    } finally {
+      runtime.clearConsolidationRetries()
+      vi.useRealTimers()
+    }
+  })
+
+  it('cancels a scheduled retry when the session is disposed', async () => {
+    vi.useFakeTimers()
+    const runtime = new OmRuntime(PlainConfig({ observeAfterTokens: 10, storageDir: dir }), { onError: () => {} })
+    try {
+      const { ctx, callCount } = fakeCtx([{ finish: 'error' }])
+      await maybeLaunchConsolidation(ctx, runtime, fakeSession(longConversation(20)))
+      expect(callCount()).toBe(1)
+      runtime.clearSession('s1')
+      await vi.advanceTimersByTimeAsync(30_000)
+      expect(callCount()).toBe(1)
+    } finally {
+      runtime.clearConsolidationRetries()
+      vi.useRealTimers()
+    }
+  })
+
+  it('releases the session without writes when a manual run is cancelled', async () => {
+    const events = longConversation(20)
+    const { ctx } = fakeCtx([{ text: 'unused' }])
+    ctx.llm.stream = async function* () { await new Promise(() => {}) }
+    const runtime = new OmRuntime(PlainConfig({ observeAfterTokens: 10, storageDir: dir }), { onError: () => {} })
+    const controller = new AbortController()
+    const pending = runConsolidationNow(ctx, runtime, fakeSession(events), controller.signal)
+    await vi.waitFor(() => expect(runtime.consolidationInFlight.has('s1')).toBe(true))
+    controller.abort(new Error('remote cancelled'))
+    await expect(pending).resolves.toBe(false)
+    expect(runtime.consolidationInFlight.size).toBe(0)
+    expect(runtime.store.entries('s1')).toHaveLength(0)
+    expect(runtime.lastObserverError.get('s1')).toContain('remote cancelled')
+  })
+
+  it('keeps active slots owned across disposal cleanup and rejects stale releases', () => {
+    const runtime = new OmRuntime(PlainConfig({ storageDir: dir }), { onError: () => {} })
+    const first = runtime.claimConsolidation('s1')!
+    runtime.clearSession('s1')
+    expect(runtime.consolidationInFlight.has('s1')).toBe(true)
+    expect(runtime.claimConsolidation('s1')).toBeUndefined()
+    expect(runtime.releaseConsolidation('s1', first)).toBe(true)
+
+    const second = runtime.claimConsolidation('s1')!
+    expect(runtime.releaseConsolidation('s1', first)).toBe(false)
+    expect(runtime.consolidationInFlight.has('s1')).toBe(true)
+    expect(runtime.releaseConsolidation('s1', second)).toBe(true)
   })
 })
 
@@ -513,6 +714,7 @@ describe('consolidation triggers', () => {
       return () => {}
     }
     const runtime = new OmRuntime(PlainConfig({ observeAfterTokens: 10, storageDir: dir }), { onError: () => {} })
+    ctx.effect = () => {}
     registerConsolidationTrigger(ctx as never, runtime)
 
     expect(handlers.has('agent/session-start')).toBe(false)

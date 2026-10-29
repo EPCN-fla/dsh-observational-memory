@@ -3,6 +3,7 @@ lib/
 *.tgz
 dist/
 coverage/
+artifacts/
 .vitest-cache/
 
 # Reference material (not part of the plugin)

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { findRollbackAnchor, hasAttachments, userTextOf } from '../src/client/rollback.ts'
+import { findRollbackAnchor, forkRollbackSession, hasAttachments, userTextOf, type RollbackSessions } from '../src/client/rollback.ts'
 
 const turn = (n: number, seq: number) => [
   { seq, type: 'turn/start' },
@@ -52,5 +52,80 @@ describe('hasAttachments', () => {
     expect(hasAttachments([{ type: 'file', attachment: {} }])).toBe(true)
     expect(hasAttachments([{ type: 'text', text: 'x' }])).toBe(false)
     expect(hasAttachments('nope')).toBe(false)
+  })
+})
+
+describe('forkRollbackSession', () => {
+  it('retains the child before restoring the draft and opening it', async () => {
+    const order: string[] = []
+    let retained = false
+    const scope = { id: 'child-scope' }
+    const sessions: RollbackSessions = {
+      fork: async ({ onCreated }) => {
+        onCreated?.('child')
+        return 'child'
+      },
+      retainAgentScope: id => {
+        order.push(`retain:${id}`)
+        retained = true
+        return { release: () => { order.push('release'); retained = false } }
+      },
+      scope: () => retained ? scope : undefined,
+      open: id => { order.push(`open:${id}`) },
+    }
+    await forkRollbackSession(sessions, 'source', 3, 'original text', (received, text) => {
+      expect(received).toBe(scope)
+      order.push(`draft:${text}`)
+    }, () => { throw new Error('unexpected failure') })
+    expect(order).toEqual(['retain:child', 'draft:original text', 'open:child', 'release'])
+  })
+
+  it('uses the host navigation callback when one is provided', async () => {
+    const opened: string[] = []
+    const scope = {}
+    const sessions: RollbackSessions = {
+      fork: async () => 'child',
+      retainAgentScope: () => ({ release: () => {} }),
+      scope: () => scope,
+      open: () => { throw new Error('history-only open must not be used') },
+    }
+    await forkRollbackSession(sessions, 'source', 3, 'text', () => {}, () => {}, id => { opened.push(id) })
+    expect(opened).toEqual(['child'])
+  })
+
+  it('continues with a child created before a later fork-step failure', async () => {
+    const opened: string[] = []
+    const drafts: string[] = []
+    const failures: string[] = []
+    const scope = {}
+    const sessions: RollbackSessions = {
+      fork: async ({ onCreated }) => {
+        onCreated?.('child')
+        throw new Error('rename failed')
+      },
+      retainAgentScope: () => ({ release: () => {} }),
+      scope: () => scope,
+      open: id => { opened.push(id) },
+    }
+    await forkRollbackSession(sessions, 'source', 3, 'original text', (_scope, text) => {
+      drafts.push(text)
+    }, failure => { failures.push(failure) })
+    expect(drafts).toEqual(['original text'])
+    expect(opened).toEqual(['child'])
+    expect(failures).toEqual([])
+  })
+
+  it('reports an unavailable child scope instead of silently dropping the draft', async () => {
+    const failures: string[] = []
+    let released = false
+    const sessions: RollbackSessions = {
+      fork: async () => 'child',
+      retainAgentScope: () => ({ release: () => { released = true } }),
+      scope: () => undefined,
+      open: () => { throw new Error('must not open without a draft') },
+    }
+    await forkRollbackSession(sessions, 'source', 3, 'original text', () => {}, failure => { failures.push(failure) })
+    expect(failures).toEqual(['restore'])
+    expect(released).toBe(true)
   })
 })

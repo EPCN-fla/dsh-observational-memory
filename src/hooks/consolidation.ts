@@ -22,6 +22,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import {
   buildObservationsDropped,
   buildObservationsRecorded,
+  buildObservationsScanned,
   buildReflectionsRecorded,
   foldLedger,
   fullProjection,
@@ -35,7 +36,7 @@ import {
   type Reflection,
 } from '../ledger/index.ts'
 import { resolveObserverChunkMaxTokens, resolveObservationsPoolTargetTokens } from '../config.ts'
-import { serializeSourceAddressedEvents } from '../serialize.ts'
+import { serializeSourceAddressedEventChunks } from '../serialize.ts'
 import type { OmRuntime, ResolveResult } from '../runtime.ts'
 import { runDropper } from '../workers/dropper.ts'
 import { runObserver } from '../workers/observer.ts'
@@ -47,6 +48,8 @@ type ResolvedModel = Extract<ResolveResult, { ok: true }>
 /** Pipeline switches: `force` bypasses the token clocks (manual runs only). */
 export interface ConsolidationOptions {
   force?: boolean
+  /** Manual caller cancellation; automatic runs still have the worker deadline. */
+  signal?: AbortSignal
 }
 
 type Notify = (level: 'info' | 'warning', message: string) => void
@@ -66,6 +69,7 @@ function isMemorySession(session: Session): boolean {
 }
 
 export function registerConsolidationTrigger(ctx: Context, runtime: OmRuntime): void {
+  ctx.effect(() => () => runtime.clearConsolidationRetries(), 'observational-memory: consolidation retries')
   ctx.on('session/event', (session, event) => {
     if (event.type !== 'turn/end') return
     if (!isMemorySession(session)) return
@@ -99,25 +103,41 @@ export async function maybeLaunchConsolidation(ctx: Context, runtime: OmRuntime,
   // with its source even with every background worker disabled.
   await runtime.ensureInherited(ctx, session)
   const config = runtime.config
-  if (config.passive) return
   const sessionId: string = session.id
-  if (runtime.consolidationInFlight.has(sessionId)) return
-  // Claim the slot atomically — no await between the check and the add — so
-  // concurrent turn/end and agent/created triggers cannot double-run the
-  // pipeline. (ensureInherited above already awaited; do not insert one here.)
-  runtime.consolidationInFlight.add(sessionId)
+  if (config.passive) {
+    runtime.clearConsolidationRetry(sessionId)
+    return
+  }
+  // Coalesce (rather than drop) a trigger that arrives during an active run.
+  // The active snapshot predates this event, so its owner performs one
+  // trailing due-check with the latest session after settling.
+  const owner = runtime.claimConsolidation(sessionId)
+  if (owner === undefined) {
+    runtime.consolidationPending.set(sessionId, session)
+    return
+  }
   try {
     const entries = await runtime.store.load(sessionId)
     const events = session.snapshotEvents()
     const observerDue = rawTokensSinceObservationCoverage(events, entries) >= config.observeAfterTokens
     const reflectorDue = rawTokensSinceReflectionCoverage(events, entries) >= config.reflectAfterTokens
-    if (!observerDue && !reflectorDue) return
+    if (!observerDue && !reflectorDue) {
+      runtime.clearConsolidationRetry(sessionId)
+      return
+    }
 
     runtime.clearStageErrors(sessionId)
-    await runConsolidationPipeline(ctx, runtime, session)
+    const succeeded = await runConsolidationPipeline(ctx, runtime, session)
+    if (succeeded) runtime.clearConsolidationRetry(sessionId)
+    else runtime.scheduleConsolidationRetry(session, () => launch(ctx, runtime, session))
   } finally {
-    runtime.consolidationInFlight.delete(sessionId)
+    const released = runtime.releaseConsolidation(sessionId, owner)
     releaseDisposedSession(ctx, runtime, session)
+    const pending = released ? runtime.consolidationPending.get(sessionId) : undefined
+    if (pending !== undefined) {
+      runtime.consolidationPending.delete(sessionId)
+      launch(ctx, runtime, pending)
+    }
   }
 }
 
@@ -149,22 +169,32 @@ function releaseDisposedSession(ctx: Context, runtime: OmRuntime, session: Sessi
  * Returns false for subagent sessions (no memory of their own) and when a
  * run is already active for the session.
  */
-export async function runConsolidationNow(ctx: Context, runtime: OmRuntime, session: Session): Promise<boolean> {
+export async function runConsolidationNow(
+  ctx: Context,
+  runtime: OmRuntime,
+  session: Session,
+  signal?: AbortSignal,
+): Promise<boolean> {
   runtime.refreshConfig()
   if (session.header.origin === 'subagent') return false
   const sessionId: string = session.id
-  if (runtime.consolidationInFlight.has(sessionId)) return false
   // Claim the slot synchronously — before the first await — so a double
   // click cannot double-run the pipeline.
-  runtime.consolidationInFlight.add(sessionId)
+  const owner = runtime.claimConsolidation(sessionId)
+  if (owner === undefined) return false
   try {
     await runtime.ensureInherited(ctx, session)
+    runtime.clearConsolidationRetry(sessionId)
     runtime.clearStageErrors(sessionId)
-    await runConsolidationPipeline(ctx, runtime, session, { force: true })
-    return true
+    return runConsolidationPipeline(ctx, runtime, session, { force: true, signal })
   } finally {
-    runtime.consolidationInFlight.delete(sessionId)
+    const released = runtime.releaseConsolidation(sessionId, owner)
     releaseDisposedSession(ctx, runtime, session)
+    const pending = released ? runtime.consolidationPending.get(sessionId) : undefined
+    if (pending !== undefined) {
+      runtime.consolidationPending.delete(sessionId)
+      launch(ctx, runtime, pending)
+    }
   }
 }
 
@@ -174,7 +204,7 @@ export async function runConsolidationPipeline(
   runtime: OmRuntime,
   session: Session,
   options: ConsolidationOptions = {},
-): Promise<void> {
+): Promise<boolean> {
   const notify = makeNotify(ctx, runtime)
   const sessionId: string = session.id
   let agent: Agent | undefined
@@ -185,7 +215,7 @@ export async function runConsolidationPipeline(
   }
 
   let cached: ResolveResult | undefined
-  const resolveModel = async (): Promise<ResolvedModel | undefined> => {
+  const resolveModel = async (): Promise<ResolvedModel> => {
     cached ??= await runtime.resolveModel(ctx, session, agent)
     if (cached.ok) {
       runtime.resolveFailureNotified.delete(sessionId)
@@ -196,7 +226,7 @@ export async function runConsolidationPipeline(
       runtime.resolveFailureNotified.add(sessionId)
       notify('warning', `memory worker skipped — ${cached.reason}`)
     }
-    return undefined
+    throw new Error(`memory worker model unavailable: ${cached.reason}`)
   }
 
   try {
@@ -205,7 +235,7 @@ export async function runConsolidationPipeline(
     const { message, consecutiveFailures } = runtime.recordStageError(sessionId, 'observer', error)
     runtime.debug(sessionId, 'observer.error', { errorMessage: message, consecutiveFailures })
     notify('warning', `observer failed: ${message} (consecutive failures: ${consecutiveFailures})`)
-    return
+    return false
   }
 
   let reflectorResult: { reflections: Reflection[]; coverageSeq?: number }
@@ -215,23 +245,25 @@ export async function runConsolidationPipeline(
     const { message, consecutiveFailures } = runtime.recordStageError(sessionId, 'reflector', error)
     runtime.debug(sessionId, 'reflector.error', { errorMessage: message, consecutiveFailures })
     notify('warning', `reflector failed: ${message} (consecutive failures: ${consecutiveFailures})`)
-    return
+    return false
   }
 
   try {
-    await runDropperStage(ctx, runtime, session, resolveModel, notify, reflectorResult.reflections, reflectorResult.coverageSeq)
+    await runDropperStage(ctx, runtime, session, resolveModel, notify, reflectorResult.reflections, reflectorResult.coverageSeq, options.signal)
   } catch (error) {
     const { message, consecutiveFailures } = runtime.recordStageError(sessionId, 'dropper', error)
     runtime.debug(sessionId, 'dropper.error', { errorMessage: message, consecutiveFailures })
     notify('warning', `dropper failed: ${message} (consecutive failures: ${consecutiveFailures})`)
+    return false
   }
+  return true
 }
 
 async function runObserverStage(
   ctx: Context,
   runtime: OmRuntime,
   session: Session,
-  resolveModel: () => Promise<ResolvedModel | undefined>,
+  resolveModel: () => Promise<ResolvedModel>,
   notify: Notify,
   options: ConsolidationOptions = {},
 ): Promise<void> {
@@ -245,78 +277,71 @@ async function runObserverStage(
 
   const coverageSeq = latestCoverageSeq(entries, 'observations-recorded')
 
-  // Deliberate-empty backoff: an intentional "nothing to record" verdict must
-  // not re-fire every turn over the same span; retry after another
-  // observeAfterTokens worth of source text, and drop the backoff as soon as
-  // coverage advances. A manual run is the user's explicit retry, so it
-  // ignores the backoff.
-  const backoff = runtime.observerEmptyBackoff.get(sessionId)
-  if (!options.force && backoff) {
-    if (coverageSeq !== backoff.coverageSeq || tokens >= backoff.tokensAtEmpty + config.observeAfterTokens) {
-      runtime.observerEmptyBackoff.delete(sessionId)
-    } else {
-      runtime.debug(sessionId, 'observer.empty_backoff', { tokens })
-      return
-    }
-  }
-
   const resolved = await resolveModel()
-  if (!resolved) return
 
   // The full post-watermark range (not just source events): the serializer
   // skips non-source content but needs tool/call events for result labels.
   const backlog = eventsAfter(events, coverageSeq)
   const maxChunkTokens = resolveObserverChunkMaxTokens(config, resolved.contextWindow)
-  const { text: chunk, sourceEventSeqs, estimatedTokens: chunkTokens } = serializeSourceAddressedEvents(backlog, {
-    maxTokens: maxChunkTokens,
-  })
-  if (!chunk.trim() || sourceEventSeqs.length === 0) return
-  const coversUpToSeq = sourceEventSeqs[sourceEventSeqs.length - 1]
+  const chunks = serializeSourceAddressedEventChunks(backlog, { maxTokens: maxChunkTokens })
+  if (chunks.length === 0) return
+  const coversUpToSeq = chunks[chunks.length - 1].sourceEventSeqs.at(-1)
+  if (coversUpToSeq === undefined) return
 
   const memory = fullProjection(entries)
   const priorReflections = memory.reflections.map(reflectionToSummaryLine)
   const priorObservations = memory.observations.map(observationToSummaryLine)
+  const accumulated = new Map<string, (typeof memory.observations)[number]>()
 
-  notify('info', `observer running on ~${chunkTokens.toLocaleString()}-token chunk via ${resolved.target.provider}/${resolved.target.model}`)
-  runtime.debug(sessionId, 'observer.start', {
-    tokens,
-    chunkTokens,
-    coversUpToSeq,
-    sourceEventSeqs,
-    provider: resolved.target.provider,
-    model: resolved.target.model,
-    viaOverride: resolved.viaOverride,
-  })
-
-  const observations = await runObserver(ctx, {
-    target: resolved.target,
-    priorReflections,
-    priorObservations,
-    chunk,
-    allowedSourceEventSeqs: sourceEventSeqs,
-    maxTurns: config.agentMaxTurns,
-  })
+  for (const [index, { text: chunk, sourceEventSeqs, estimatedTokens: chunkTokens }] of chunks.entries()) {
+    notify('info', `observer running on ~${chunkTokens.toLocaleString()}-token chunk ${index + 1}/${chunks.length} via ${resolved.target.provider}/${resolved.target.model}`)
+    runtime.debug(sessionId, 'observer.start', {
+      tokens,
+      chunkTokens,
+      chunkIndex: index + 1,
+      chunkCount: chunks.length,
+      sourceEventSeqs,
+      provider: resolved.target.provider,
+      model: resolved.target.model,
+      viaOverride: resolved.viaOverride,
+    })
+    const observations = await runObserver(ctx, {
+      target: resolved.target,
+      priorReflections,
+      priorObservations: [...priorObservations, ...Array.from(accumulated.values(), observationToSummaryLine)],
+      chunk,
+      allowedSourceEventSeqs: sourceEventSeqs,
+      maxTurns: config.agentMaxTurns,
+      signal: options.signal,
+    })
+    for (const observation of observations ?? []) {
+      if (!accumulated.has(observation.id)) accumulated.set(observation.id, observation)
+    }
+  }
+  const observations = Array.from(accumulated.values())
+  options.signal?.throwIfAborted()
   // The model call itself settled: an override-path success re-arms a
   // suspended override, whatever the verdict.
   runtime.noteWorkerSuccess(sessionId, resolved.viaOverride)
 
   if (!observations || observations.length === 0) {
-    runtime.observerEmptyBackoff.set(sessionId, { coverageSeq, tokensAtEmpty: tokens })
+    // A call-free verdict is an intentional "nothing durable here" scan, not
+    // a worker failure. Persist its coverage so the next run advances to the
+    // next chunk instead of starving all later source behind an empty head.
+    const scanned = buildObservationsScanned(coversUpToSeq)
+    if (scanned) await runtime.store.append(sessionId, scanned)
     const streak = runtime.noteObserverEmpty(sessionId)
     runtime.debug(sessionId, 'observer.empty', { coversUpToSeq, consecutiveEmpties: streak })
-    // A first empty verdict can be legitimate ("nothing worth recording");
-    // consecutive empties over a growing backlog usually mean the worker
-    // model is not following the record_observations tool contract — warn.
     if (streak >= 2) {
       notify('warning', `observer returned no observations in ${streak} consecutive runs; the worker model may not be calling the record_observations tool`)
     } else {
-      notify('info', 'observer found nothing new in this chunk (coverage unchanged; will retry later)')
+      notify('info', 'observer found nothing new in this chunk; coverage advanced')
     }
     return
   }
-  runtime.observerEmptyBackoff.delete(sessionId)
   runtime.clearObserverEmpties(sessionId)
 
+  options.signal?.throwIfAborted()
   const record = buildObservationsRecorded(observations, coversUpToSeq)
   if (!record) return
   await runtime.store.append(sessionId, record)
@@ -328,7 +353,7 @@ async function runReflectorStage(
   ctx: Context,
   runtime: OmRuntime,
   session: Session,
-  resolveModel: () => Promise<ResolvedModel | undefined>,
+  resolveModel: () => Promise<ResolvedModel>,
   notify: Notify,
   options: ConsolidationOptions = {},
 ): Promise<{ reflections: Reflection[]; coverageSeq?: number }> {
@@ -350,7 +375,6 @@ async function runReflectorStage(
   if (options.force && foldLedger(entries).activeObservations.length === 0) return { reflections: [] }
 
   const resolved = await resolveModel()
-  if (!resolved) return { reflections: [] }
 
   notify('info', `reflector running (~${reflectionTokens.toLocaleString()} tokens)`)
   const folded = foldLedger(entries)
@@ -359,10 +383,13 @@ async function runReflectorStage(
     reflections: folded.reflections,
     observations: folded.activeObservations,
     maxTurns: config.agentMaxTurns,
+    signal: options.signal,
   })
+  options.signal?.throwIfAborted()
   runtime.noteWorkerSuccess(sessionId, resolved.viaOverride)
   if (!reflections || reflections.length === 0) return { reflections: [] }
 
+  options.signal?.throwIfAborted()
   const record = buildReflectionsRecorded(reflections, observationCoverageSeq)
   if (!record) return { reflections: [] }
   await runtime.store.append(sessionId, record)
@@ -386,10 +413,11 @@ async function runDropperStage(
   ctx: Context,
   runtime: OmRuntime,
   session: Session,
-  resolveModel: () => Promise<ResolvedModel | undefined>,
+  resolveModel: () => Promise<ResolvedModel>,
   notify: Notify,
   sameRunReflections: Reflection[],
   sameRunReflectionCoverageSeq: number | undefined,
+  signal?: AbortSignal,
 ): Promise<void> {
   if (sameRunReflectionCoverageSeq === undefined || sameRunReflections.length === 0) {
     return
@@ -417,7 +445,6 @@ async function runDropperStage(
     `dropper running after reflection — active observation pool ~${metrics.observationTokens.toLocaleString()} / ${metrics.targetTokens.toLocaleString()} target tokens`,
   )
   const resolved = await resolveModel()
-  if (!resolved) return
 
   const reflectionsForDropper = mergeReflections(folded.reflections, sameRunReflections)
   const droppedIds = await runDropper(ctx, {
@@ -426,13 +453,16 @@ async function runDropperStage(
     observations: folded.activeObservations,
     targetTokens,
     maxTurns: config.agentMaxTurns,
+    signal,
   })
+  signal?.throwIfAborted()
   runtime.noteWorkerSuccess(sessionId, resolved.viaOverride)
 
   const coversUpToSeq = earlierSeq(observationCoverageSeq, sameRunReflectionCoverageSeq)
   const record = coversUpToSeq !== undefined && droppedIds ? buildObservationsDropped(droppedIds, coversUpToSeq) : undefined
   runtime.debug(sessionId, 'dropper.append', { droppedIdsCount: droppedIds?.length ?? 0, coversUpToSeq })
   if (record) {
+    signal?.throwIfAborted()
     await runtime.store.append(sessionId, record)
     notify('info', `${record.observationIds.length} observation${record.observationIds.length === 1 ? '' : 's'} dropped from active memory`)
   }

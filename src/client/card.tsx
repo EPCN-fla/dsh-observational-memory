@@ -22,8 +22,8 @@ export interface ObservationalMemoryCardProps {
   save: OmCardFace['save']
   discard: OmCardFace['discard']
   retryCatalog: OmCardFace['retryCatalog']
-  /** Start expanded (the plugin-manager page view renders the form itself). */
-  initialOpen?: boolean
+  /** Render the plugin-manager page form without disclosure controls. */
+  fixedOpen?: boolean
 }
 
 interface NumberFieldDef {
@@ -240,12 +240,14 @@ function ModelSelect(props: {
 export function ObservationalMemoryCard(props: ObservationalMemoryCardProps) {
   const { t } = props
   const state = props.useOmCard((snapshot) => snapshot)
-  const [open, setOpen] = useState(props.initialOpen ?? false)
+  const [open, setOpen] = useState(false)
+  const expanded = props.fixedOpen === true || open
   const saveStarted = useRef(false)
 
   // Collapse only after a Host-confirmed save; a failed write keeps its
   // diagnostics and drafts visible for correction.
   useEffect(() => {
+    if (props.fixedOpen) return
     if (state.saving) {
       saveStarted.current = true
       return
@@ -253,7 +255,7 @@ export function ObservationalMemoryCard(props: ObservationalMemoryCardProps) {
     if (!saveStarted.current) return
     saveStarted.current = false
     if (!state.dirty && !state.failed) setOpen(false)
-  }, [state.dirty, state.failed, state.saving])
+  }, [props.fixedOpen, state.dirty, state.failed, state.saving])
 
   if (!state.available) return null
 
@@ -325,22 +327,32 @@ export function ObservationalMemoryCard(props: ObservationalMemoryCardProps) {
     )
 
   return (
-    <li className={`${css.card} ${open ? css.cardOpen : ''}`}>
-      <button
-        type="button"
-        className={css.header}
-        aria-expanded={open}
-        aria-label={`${t(open ? 'state.collapse' : 'state.expand')}: ${t('card.title')}`}
-        onClick={() => setOpen(!open)}
-      >
-        <span className={css.headText}>
-          <span className={css.name}>{t('card.title')}</span>
-          <span className={css.description}>{t('card.description')}</span>
-        </span>
-        {state.dirty ? <span className={css.tag}>{t('state.unsaved')}</span> : null}
-        <span className={`${css.chevron} ${open ? css.chevronOpen : ''}`} aria-hidden="true">▾</span>
-      </button>
-      {open ? (
+    <li className={`${css.card} ${expanded ? css.cardOpen : ''}`}>
+      {props.fixedOpen ? (
+        <div className={`${css.header} ${css.headerStatic}`}>
+          <span className={css.headText}>
+            <span className={css.name}>{t('card.title')}</span>
+            <span className={css.description}>{t('card.description')}</span>
+          </span>
+          {state.dirty ? <span className={css.tag}>{t('state.unsaved')}</span> : null}
+        </div>
+      ) : (
+        <button
+          type="button"
+          className={css.header}
+          aria-expanded={open}
+          aria-label={`${t(open ? 'state.collapse' : 'state.expand')}: ${t('card.title')}`}
+          onClick={() => setOpen(!open)}
+        >
+          <span className={css.headText}>
+            <span className={css.name}>{t('card.title')}</span>
+            <span className={css.description}>{t('card.description')}</span>
+          </span>
+          {state.dirty ? <span className={css.tag}>{t('state.unsaved')}</span> : null}
+          <span className={`${css.chevron} ${open ? css.chevronOpen : ''}`} aria-hidden="true">▾</span>
+        </button>
+      )}
+      {expanded ? (
         <div className={css.body}>
           {!state.writable ? <p className={css.readOnly} role="status">{t('state.readOnly')}</p> : null}
 
@@ -438,7 +450,7 @@ export function ObservationalMemoryCard(props: ObservationalMemoryCardProps) {
           />
 
           <div className={css.footer}>
-            {state.failed ? <p className={css.failed} role="status">{t('state.saveFailed')}</p> : null}
+            {state.failed ? <p className={css.failed} role="status">{t(state.partial ? 'state.savePartial' : 'state.saveFailed')}</p> : null}
             <button
               type="button"
               className={css.discard}
@@ -466,7 +478,7 @@ export function ObservationalMemoryCard(props: ObservationalMemoryCardProps) {
  */
 export function ObservationalMemoryBundleConfig(props: ObservationalMemoryCardProps & { view: 'summary' | 'page' }) {
   if (props.view === 'summary') return <>{props.t('card.description')}</>
-  // The page view IS the configuration page: render the form expanded, not
-  // hidden behind the collapsible card chrome the settings-list row uses.
-  return <ObservationalMemoryCard {...props} initialOpen />
+  // The page view IS the configuration page: keep the form visible without
+  // the collapsible card chrome the settings-list row uses, including after saves.
+  return <ObservationalMemoryCard {...props} fixedOpen />
 }

@@ -13,6 +13,7 @@ function stateWith(overrides: Partial<OmCardState> = {}): OmCardState {
     invalid: false,
     saving: false,
     failed: false,
+    partial: false,
     fields: {},
     catalogStatus: 'idle',
     catalog: [],

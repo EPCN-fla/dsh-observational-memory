@@ -32,7 +32,11 @@ function lastMessage(options) {
 }
 
 function isToolResult(message) {
-  return Array.isArray(message?.content) && message.content[0]?.type === 'tool-result'
+  // DSH ≥0.1.7 uses a first-class tool-role message whose content is the
+  // result payload itself; the legacy user-role wrapper carried tool-result.
+  return message?.role === 'tool'
+    || message?.source?.kind === 'tool'
+    || (Array.isArray(message?.content) && message.content[0]?.type === 'tool-result')
 }
 
 function estimateInputTokens(options) {

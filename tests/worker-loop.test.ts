@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest'
-import { runWorkerLoop, WorkerStreamError } from '../src/workers/loop.ts'
+import { describe, expect, it, vi } from 'vitest'
+import { runWorkerLoop, WORKER_TIMEOUT_MS, WorkerStreamError, WorkerTimeoutError, WorkerTurnLimitError } from '../src/workers/loop.ts'
 import { fakeLlmCtx } from './fake-llm.ts'
 
 const echoTool = {
@@ -39,20 +39,56 @@ describe('runWorkerLoop', () => {
     expect(JSON.stringify(toolResult?.content)).toContain('echo: hi')
   })
 
-  it('caps the number of turns', async () => {
+  it('rejects an unfinished tool-call chain at the turn cap', async () => {
     const { ctx, callCount } = fakeLlmCtx([
       { toolCalls: [{ id: 'c1', name: 'echo', arguments: '{"text":"a"}' }] },
     ])
-    const result = await runWorkerLoop(ctx, {
+    await expect(runWorkerLoop(ctx, {
       provider: 'p',
       model: 'm',
       system: 'sys',
       userText: 'user',
       tools: [echoTool],
       maxTurns: 3,
-    })
-    expect(result.turns).toBe(3)
+    })).rejects.toBeInstanceOf(WorkerTurnLimitError)
     expect(callCount()).toBe(3)
+  })
+
+  it('aborts a stream that never yields even when it ignores the signal', async () => {
+    const controller = new AbortController()
+    const ctx = {
+      llm: {
+        async *stream() {
+          await new Promise(() => {})
+        },
+      },
+    } as never
+    const pending = runWorkerLoop(ctx, {
+      provider: 'p', model: 'm', system: 's', userText: 'u', tools: [echoTool], maxTurns: 2, signal: controller.signal,
+    })
+    controller.abort(new Error('client disconnected'))
+    await expect(pending).rejects.toThrow('client disconnected')
+  })
+
+  it('enforces the whole-run deadline on an unresponsive stream', async () => {
+    vi.useFakeTimers()
+    try {
+      const ctx = {
+        llm: {
+          async *stream() {
+            await new Promise(() => {})
+          },
+        },
+      } as never
+      const pending = runWorkerLoop(ctx, {
+        provider: 'p', model: 'm', system: 's', userText: 'u', tools: [echoTool], maxTurns: 2,
+      })
+      const assertion = expect(pending).rejects.toBeInstanceOf(WorkerTimeoutError)
+      await vi.advanceTimersByTimeAsync(WORKER_TIMEOUT_MS)
+      await assertion
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('throws WorkerStreamError on a terminal error finish', async () => {

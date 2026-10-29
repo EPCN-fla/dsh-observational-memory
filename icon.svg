@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" role="img" aria-labelledby="title description">
+  <title id="title">Observational Memory</title>
+  <desc id="description">An eye surrounding a layered memory store, representing observation and durable reflection.</desc>
+  <defs>
+    <linearGradient id="background" x1="18" y1="12" x2="110" y2="116" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#4f46b8"/>
+      <stop offset="0.52" stop-color="#6366d9"/>
+      <stop offset="1" stop-color="#159c9c"/>
+    </linearGradient>
+    <linearGradient id="iris" x1="50" y1="48" x2="78" y2="82" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#8b8cf0"/>
+      <stop offset="1" stop-color="#4f46b8"/>
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="url(#background)"/>
+  <rect x="5" y="5" width="118" height="118" rx="27" fill="none" stroke="#ffffff" stroke-opacity="0.2" stroke-width="2"/>
+  <path d="M22 64c10-19 24-29 42-29s32 10 42 29c-10 19-24 29-42 29S32 83 22 64Z" fill="#ffffff" fill-opacity="0.12" stroke="#ffffff" stroke-width="5" stroke-linejoin="round"/>
+  <circle cx="64" cy="64" r="23" fill="#ffffff"/>
+  <ellipse cx="64" cy="54" rx="15" ry="7" fill="url(#iris)"/>
+  <path d="M49 54v20c0 4 7 8 15 8s15-4 15-8V54" fill="url(#iris)"/>
+  <path d="M49 61c0 4 7 8 15 8s15-4 15-8M49 69c0 4 7 8 15 8s15-4 15-8" fill="none" stroke="#ffffff" stroke-opacity="0.8" stroke-width="2.5"/>
+  <ellipse cx="64" cy="54" rx="15" ry="7" fill="none" stroke="#ffffff" stroke-width="2.5"/>
+  <path d="M34 32 30 26M94 32l4-6M31 96l-5 5M97 96l5 5" fill="none" stroke="#ffffff" stroke-linecap="round" stroke-opacity="0.72" stroke-width="4"/>
+</svg>

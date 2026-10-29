@@ -28,12 +28,6 @@ export type ResolveResult =
     }
   | { ok: false; reason: string }
 
-/** Deliberate-empty observer backoff state for one session. */
-export type EmptyBackoff = {
-  coverageSeq: number
-  tokensAtEmpty: number
-}
-
 /** Storage root for ledgers and debug logs. */
 export function storageRoot(config: ResolvedConfig): string {
   const configured = config.storageDir
@@ -50,6 +44,66 @@ export class OmRuntime {
 
   /** Sessions with a consolidation pipeline currently running. */
   readonly consolidationInFlight = new Set<string>()
+  private readonly consolidationOwners = new Map<string, symbol>()
+  /** Latest automatic trigger coalesced while a session pipeline is active. */
+  readonly consolidationPending = new Map<string, Session>()
+  /** Claim one session pipeline; only the returned owner may release it. */
+  claimConsolidation(sessionId: string): symbol | undefined {
+    if (this.consolidationOwners.has(sessionId)) return undefined
+    const owner = Symbol(sessionId)
+    this.cancelConsolidationRetryTimer(sessionId)
+    this.consolidationOwners.set(sessionId, owner)
+    this.consolidationInFlight.add(sessionId)
+    return owner
+  }
+
+  /** Release only the owner's slot; a stale task cannot unlock a newer run. */
+  releaseConsolidation(sessionId: string, owner: symbol): boolean {
+    if (this.consolidationOwners.get(sessionId) !== owner) return false
+    this.consolidationOwners.delete(sessionId)
+    this.consolidationInFlight.delete(sessionId)
+    return true
+  }
+
+  private readonly consolidationRetryTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  private readonly consolidationRetryAttempts = new Map<string, number>()
+
+  /** Clear one pending retry timer while retaining its backoff attempt count. */
+  private cancelConsolidationRetryTimer(sessionId: string): void {
+    const timer = this.consolidationRetryTimers.get(sessionId)
+    if (timer !== undefined) clearTimeout(timer)
+    this.consolidationRetryTimers.delete(sessionId)
+  }
+
+  /** Schedule one bounded automatic retry; external triggers cancel the timer on claim. */
+  scheduleConsolidationRetry(session: Session, retry: () => void): void {
+    const sessionId = session.id
+    this.cancelConsolidationRetryTimer(sessionId)
+    const attempt = (this.consolidationRetryAttempts.get(sessionId) ?? 0) + 1
+    if (attempt > 5) return
+    this.consolidationRetryAttempts.set(sessionId, attempt)
+    const timer = setTimeout(() => {
+      this.consolidationRetryTimers.delete(sessionId)
+      retry()
+    }, Math.min(1_000 * 2 ** (attempt - 1), 30_000))
+    timer.unref?.()
+    this.consolidationRetryTimers.set(sessionId, timer)
+    this.debug(sessionId, 'consolidation.retry_scheduled', { attempt, delayMs: Math.min(1_000 * 2 ** (attempt - 1), 30_000) })
+  }
+
+  /** Stop retrying after success, manual intervention, passive mode or no backlog. */
+  clearConsolidationRetry(sessionId: string): void {
+    this.cancelConsolidationRetryTimer(sessionId)
+    this.consolidationRetryAttempts.delete(sessionId)
+  }
+
+  /** Plugin unload: no timer may retain a disposed runtime or session. */
+  clearConsolidationRetries(): void {
+    for (const timer of this.consolidationRetryTimers.values()) clearTimeout(timer)
+    this.consolidationRetryTimers.clear()
+    this.consolidationRetryAttempts.clear()
+  }
+
   /** Sessions with a proactive compaction currently in flight. */
   readonly compactInFlight = new Set<string>()
   /** Fork-ledger inheritance runs in flight, deduped per session. */
@@ -58,7 +112,6 @@ export class OmRuntime {
   readonly lastObserverError = new Map<string, string>()
   readonly lastReflectorError = new Map<string, string>()
   readonly lastDropperError = new Map<string, string>()
-  readonly observerEmptyBackoff = new Map<string, EmptyBackoff>()
   /** Sessions already notified about model resolution failure (notify once). */
   readonly resolveFailureNotified = new Set<string>()
   /**
@@ -77,9 +130,10 @@ export class OmRuntime {
    * Context-window lookups per route. The host re-calls the adapter on every
    * resolveModelInfo, and ratio mode resolves on every idle event and status
    * poll; route windows are static for the adapter's lifetime, so cache both
-   * hits and (as undefined) unresolvable routes.
+   * hits. Failures and missing windows are deliberately not cached: an adapter
+   * that is still starting must be retried on the next idle/status pass.
    */
-  private readonly contextWindowCache = new Map<string, number | undefined>()
+  private readonly contextWindowCache = new Map<string, number>()
 
   constructor(initialConfig: Config, hooks: { onError: (message: string) => void }) {
     this._config = resolveConfig(initialConfig)
@@ -213,13 +267,15 @@ export class OmRuntime {
    */
   clearSession(sessionId: string): void {
     this.clearStageErrors(sessionId)
-    this.observerEmptyBackoff.delete(sessionId)
     this.resolveFailureNotified.delete(sessionId)
     this.workerConsecutiveFailures.delete(sessionId)
     this.overrideSuspensionNotified.delete(sessionId)
     this.observerConsecutiveEmpties.delete(sessionId)
-    this.compactInFlight.delete(sessionId)
-    this.consolidationInFlight.delete(sessionId)
+    // Active task slots are owner-managed. Clearing them here would let a
+    // same-id reattach run concurrently with the old task; their finally
+    // blocks release them after the work actually settles.
+    this.consolidationPending.delete(sessionId)
+    this.clearConsolidationRetry(sessionId)
   }
 
   /**
@@ -314,8 +370,11 @@ export class OmRuntime {
     } catch {
       window = undefined
     }
-    this.contextWindowCache.set(key, window)
-    return window
+    if (typeof window === 'number' && Number.isFinite(window) && window > 0) {
+      this.contextWindowCache.set(key, window)
+      return window
+    }
+    return undefined
   }
 
   /**

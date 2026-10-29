@@ -201,7 +201,6 @@ export type SourceAddressedSerialization = {
   text: string
   sourceEventSeqs: number[]
   estimatedTokens: number
-  truncatedSourceEventSeqs: number[]
 }
 
 export type SourceAddressedSerializationOptions = {
@@ -209,38 +208,30 @@ export type SourceAddressedSerializationOptions = {
   maxTokens?: number
 }
 
-const SOURCE_OMISSION_MARKER =
-  '\n\n[… middle omitted: source exceeds observer input budget; original source remains in the session log …]\n\n'
-
-function truncateSourceBlockToTokenBudget(label: string, rendered: string, maxTokens: number): string | undefined {
-  const required = `${label}\n${SOURCE_OMISSION_MARKER}`
-  if (estimateStringTokens(required) > maxTokens) return undefined
-  const full = `${label}\n${rendered}`
-  if (estimateStringTokens(full) <= maxTokens) return full
-  const maxChars = Math.max(1, maxTokens * 4)
-  const fixed = `${label}\n${SOURCE_OMISSION_MARKER}`
-  const retainedChars = maxChars - fixed.length
-  const headChars = Math.ceil(retainedChars / 2)
-  const tailChars = retainedChars - headChars
-  return `${label}\n${rendered.slice(0, headChars)}${SOURCE_OMISSION_MARKER}${tailChars > 0 ? rendered.slice(-tailChars) : ''}`
-}
-
 /**
- * Serialize complete source events up to the token budget, oldest first, each
- * behind a `[Source event seq: N]` label the observer cites back. If the first
- * event alone exceeds the budget it is included as a marked head/tail excerpt
- * so one oversized tool result cannot stall coverage; the original event is
- * never modified and stays recallable by seq.
+ * Lossless observer chunks. Ordinary events are grouped up to the budget;
+ * one oversized event is split into ordered excerpts instead of dropping its
+ * middle. Callers must process every returned chunk before advancing coverage.
  */
-export function serializeSourceAddressedEvents(
+export function serializeSourceAddressedEventChunks(
   events: readonly EventView[],
   options: SourceAddressedSerializationOptions = {},
-): SourceAddressedSerialization {
+): SourceAddressedSerialization[] {
   const toolNames = toolNameByCallId(events)
-  const blocks: string[] = []
-  const sourceEventSeqs: number[] = []
-  const truncatedSourceEventSeqs: number[] = []
+  const maxTokens = options.maxTokens
+  const chunks: SourceAddressedSerialization[] = []
+  let blocks: string[] = []
+  let sourceEventSeqs: number[] = []
   let estimatedTokens = 0
+
+  const flush = (): void => {
+    if (blocks.length === 0) return
+    const text = blocks.join('\n\n')
+    chunks.push({ text, sourceEventSeqs, estimatedTokens: estimateStringTokens(text) })
+    blocks = []
+    sourceEventSeqs = []
+    estimatedTokens = 0
+  }
 
   for (const event of events) {
     if (!isSourceEvent(event)) continue
@@ -248,28 +239,38 @@ export function serializeSourceAddressedEvents(
     if (!rendered || !rendered.trim()) continue
     const label = `[Source event seq: ${event.seq}]`
     const block = `${label}\n${rendered}`
-    const separator = blocks.length > 0 ? '\n\n' : ''
-    const blockTokens = estimateStringTokens(`${separator}${block}`)
-    const maxTokens = options.maxTokens
+    const separatorTokens = blocks.length > 0 ? estimateStringTokens('\n\n') : 0
+    const blockTokens = estimateStringTokens(block)
 
-    if (maxTokens !== undefined && estimatedTokens + blockTokens > maxTokens) {
-      if (blocks.length > 0) break
-      const excerpt = truncateSourceBlockToTokenBudget(label, rendered, maxTokens)
-      if (!excerpt) break
-      blocks.push(excerpt)
-      sourceEventSeqs.push(event.seq)
-      truncatedSourceEventSeqs.push(event.seq)
-      estimatedTokens = estimateStringTokens(excerpt)
-      break
+    if (maxTokens !== undefined && blockTokens > maxTokens) {
+      flush()
+      // The label and part marker consume budget too. Config's minimum is far
+      // above this bound; reject pathological direct callers rather than
+      // silently returning an over-budget or empty chunk.
+      let offset = 0
+      let part = 0
+      while (offset < rendered.length) {
+        part += 1
+        const partLabel = `[Source event seq: ${event.seq}; part ${part}]`
+        const prefixTokens = estimateStringTokens(`${partLabel}\n`)
+        if (prefixTokens >= maxTokens) throw new RangeError(`observer chunk budget ${maxTokens} is too small for source labels`)
+        const length = Math.max(1, (maxTokens - prefixTokens) * 4)
+        const text = `${partLabel}\n${rendered.slice(offset, offset + length)}`
+        if (estimateStringTokens(text) > maxTokens) throw new Error('observer chunk estimator exceeded its budget')
+        chunks.push({ text, sourceEventSeqs: [event.seq], estimatedTokens: estimateStringTokens(text) })
+        offset += length
+      }
+      continue
     }
 
-    blocks.push(block)
+    if (maxTokens !== undefined && estimatedTokens + separatorTokens + blockTokens > maxTokens) flush()
+    const separator = blocks.length > 0 ? '\n\n' : ''
+    blocks.push(`${separator}${block}`)
     sourceEventSeqs.push(event.seq)
-    estimatedTokens += blockTokens
+    estimatedTokens += estimateStringTokens(`${separator}${block}`)
   }
-
-  const text = blocks.join('\n\n')
-  return { text, sourceEventSeqs, estimatedTokens: estimateStringTokens(text), truncatedSourceEventSeqs }
+  flush()
+  return chunks
 }
 
 // ---------------------------------------------------------------------------

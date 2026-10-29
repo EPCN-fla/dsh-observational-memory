@@ -120,7 +120,7 @@ export interface RollbackInjected {
   /** The live event window used to resolve the fork anchor at click time. */
   rollbackWindow: () => { entries: readonly RollbackEventView[]; hasMore: boolean }
   /** Fork at the anchor before `messageSeq`, open the child, seed its draft. */
-  rollback: (messageSeq: number, text: string) => void
+  rollback: (messageSeq: number, text: string) => Promise<void>
   /** Surface a composer notice when the rollback point cannot be resolved. */
   notifyRollbackBlocked: () => void
 }
@@ -306,12 +306,17 @@ export const OmUserMessageNodeView = memo(function OmUserMessageNodeView(
   const { node, t } = props
   const data = node.data
   const { text, attachments, rest } = contentParts(data.content)
+  const [rollbackPending, setRollbackPending] = useState(false)
+  const rollbackInFlight = useRef(false)
+  const mounted = useRef(true)
+  useEffect(() => () => { mounted.current = false }, [])
 
   // text to restore, no attachments, and a completed earlier
   // turn to fork from (a turn-0 message has no rollback point).
   const turn = node.location.kind === 'turn' || node.location.kind === 'step' ? node.location.turn?.turn : undefined
-  const rollbackAvailable = text !== '' && !hasAttachments(data.content) && turn !== undefined && turn > 0
+  const rollbackAvailable = !rollbackPending && text !== '' && !hasAttachments(data.content) && turn !== undefined && turn > 0
   const onRollback = (): void => {
+    if (rollbackInFlight.current) return
     // The anchor is resolved against the live event window at click time, not
     // render time: turn numbers guarantee existence, the window provides seqs.
     // data.seq is the durable user/message event seq (anchorSeq is a
@@ -320,15 +325,20 @@ export const OmUserMessageNodeView = memo(function OmUserMessageNodeView(
     // recent message lives inside it even while older pages stay unloaded.
     const window = props.rollbackWindow()
     const anchor = findRollbackAnchor(window.entries, data.seq)
-    if (anchor !== undefined) {
-      props.rollback(anchor, text)
+    if (anchor === undefined) {
+      // A miss with older pages still unloaded means the anchor likely sits in
+      // one of them (say so on the composer instead of silently no-op'ing); a
+      // miss on a fully loaded prefix means there is no earlier boundary,
+      // which the turn gate should already have excluded.
+      props.notifyRollbackBlocked()
       return
     }
-    // A miss with older pages still unloaded means the anchor likely sits in
-    // one of them (say so on the composer instead of silently no-op'ing); a
-    // miss on a fully loaded prefix means there is no earlier boundary,
-    // which the turn gate should already have excluded.
-    props.notifyRollbackBlocked()
+    rollbackInFlight.current = true
+    setRollbackPending(true)
+    void Promise.resolve(props.rollback(anchor, text)).finally(() => {
+      rollbackInFlight.current = false
+      if (mounted.current) setRollbackPending(false)
+    })
   }
 
   const actions = (

@@ -169,7 +169,13 @@ const fields = {
  * there too — {@link unwrapVolatileConfig} handles both shapes.
  */
 export const Config = z.object(
-  Object.fromEntries(Object.entries(fields).map(([key, field]) => [key, field.volatile()]) as never),
+  Object.fromEntries(Object.entries(fields).map(([key, field]) => {
+    // Schemastery 3.18.2 (DSH 0.1.5) predates volatile refs. Its legacy
+    // settings transport consumes the plain schema; newer hosts opt into
+    // live configuration when the method exists.
+    const live = field as typeof field & { volatile?: () => typeof field }
+    return [key, live.volatile?.() ?? field]
+  }) as never),
 ) as unknown as z<Config>
 
 /**

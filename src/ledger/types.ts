@@ -100,6 +100,18 @@ export function isMemoryId(value: unknown): value is string {
   return typeof value === 'string' && MEMORY_ID_PATTERN.test(value)
 }
 
+/** Strict local timestamp used in observation lines; reject forged extra lines. */
+export function isObservationTimestamp(value: unknown): value is string {
+  if (typeof value !== 'string') return false
+  const match = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})$/.exec(value)
+  if (!match) return false
+  const [year, month, day, hour, minute] = match.slice(1).map(Number)
+  if (month < 1 || month > 12 || hour > 23 || minute > 59) return false
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0)
+  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+  return day >= 1 && day <= days[month - 1]
+}
+
 function isTokenCount(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0
 }
@@ -121,7 +133,8 @@ export function isObservation(value: unknown): value is Observation {
   return (
     isMemoryId(value.id) &&
     isNonEmptyString(value.content) &&
-    isNonEmptyString(value.timestamp) &&
+    !/\r|\n/.test(value.content) &&
+    isObservationTimestamp(value.timestamp) &&
     isRelevance(value.relevance) &&
     isSeqArray(value.sourceEventSeqs) &&
     isTokenCount(value.tokenCount)
@@ -144,7 +157,8 @@ export function isObservationsRecordedRecord(value: unknown): value is Observati
   return (
     value.kind === 'observations-recorded' &&
     Array.isArray(value.observations) &&
-    value.observations.length > 0 &&
+    // Empty batches are deliberate scan-only coverage records: they let the
+    // observer advance past a chunk with nothing durable to record.
     value.observations.every(isObservation) &&
     isSeq(value.coversUpToSeq)
   )
@@ -217,4 +231,10 @@ export function buildObservationsDropped(
 ): ObservationsDroppedRecord | undefined {
   if (observationIds.length === 0 || !isSeq(coversUpToSeq)) return undefined
   return { kind: 'observations-dropped', observationIds, coversUpToSeq }
+}
+
+/** Record a completed scan that deliberately produced no observations. */
+export function buildObservationsScanned(coversUpToSeq: number): ObservationsRecordedRecord | undefined {
+  if (!isSeq(coversUpToSeq)) return undefined
+  return { kind: 'observations-recorded', observations: [], coversUpToSeq }
 }

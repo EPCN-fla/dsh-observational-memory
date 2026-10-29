@@ -6,7 +6,7 @@
  */
 import { useEffect, useRef, useState } from 'react'
 import type { LocaleKey } from './locales.ts'
-import type { MemoryViewMode, OmMemoryState } from './memory.ts'
+import { MEMORY_RUN_SKIPPED, type MemoryViewMode, type OmMemoryState } from './memory.ts'
 import css from './memory.module.css'
 
 export type MemoryTranslate = (key: LocaleKey, params?: Record<string, string | number>) => string
@@ -16,7 +16,7 @@ export type MemoryTranslate = (key: LocaleKey, params?: Record<string, string | 
  * secure context, which loopback HTTP already is, but the textarea path keeps
  * older embedders working. Returns whether the write succeeded.
  */
-async function writeClipboardText(text: string): Promise<boolean> {
+export async function writeClipboardText(text: string): Promise<boolean> {
   try {
     if (typeof navigator !== 'undefined' && navigator.clipboard !== undefined) {
       await navigator.clipboard.writeText(text)
@@ -25,19 +25,19 @@ async function writeClipboardText(text: string): Promise<boolean> {
   } catch {
     // Fall through to the legacy path.
   }
+  if (typeof document === 'undefined') return false
+  const area = document.createElement('textarea')
   try {
-    if (typeof document === 'undefined') return false
-    const area = document.createElement('textarea')
     area.value = text
     area.style.position = 'fixed'
     area.style.opacity = '0'
     document.body.appendChild(area)
     area.select()
-    const ok = document.execCommand('copy')
-    area.remove()
-    return ok
+    return document.execCommand('copy')
   } catch {
     return false
+  } finally {
+    area.remove()
   }
 }
 
@@ -151,7 +151,9 @@ export function MemoryView(props: MemoryViewProps) {
       ) : null}
       {state.error !== undefined ? (
         <p className={css.error} role="status">
-          {t(state.failedAction === 'run' ? 'memory.runFailed' : 'memory.error')}: {state.error}
+          {state.error === MEMORY_RUN_SKIPPED
+            ? t('memory.runSkipped')
+            : <>{t(state.failedAction === 'run' ? 'memory.runFailed' : 'memory.error')}: {state.error}</>}
         </p>
       ) : null}
       {state.phase === 'loading' ? (

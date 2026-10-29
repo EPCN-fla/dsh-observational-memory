@@ -30,6 +30,43 @@ declare module '@deepseek-ai/dsh-llm' {
   }
 }
 
+/** Hard deadline for one complete worker run, including every tool round. */
+export const WORKER_TIMEOUT_MS = 120_000
+
+export class WorkerTimeoutError extends Error {
+  constructor() {
+    super(`worker exceeded its ${WORKER_TIMEOUT_MS}ms deadline; coverage was not advanced`)
+    this.name = 'WorkerTimeoutError'
+  }
+}
+
+function abortReason(signal: AbortSignal): unknown {
+  return signal.reason ?? new Error('worker aborted; coverage was not advanced')
+}
+
+/** Await an operation even when its producer ignores the abort signal. */
+async function withWorkerAbort<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) throw abortReason(signal)
+  let listener!: () => void
+  const aborted = new Promise<never>((_resolve, reject) => {
+    listener = () => reject(abortReason(signal))
+    signal.addEventListener('abort', listener, { once: true })
+  })
+  try {
+    return await Promise.race([operation, aborted])
+  } finally {
+    signal.removeEventListener('abort', listener)
+  }
+}
+
+/** Thrown when the model still requests tools after the configured turn cap. */
+export class WorkerTurnLimitError extends Error {
+  constructor(readonly maxTurns: number) {
+    super(`worker still requested tool calls after ${maxTurns} turn${maxTurns === 1 ? '' : 's'}; coverage was not advanced`)
+    this.name = 'WorkerTurnLimitError'
+  }
+}
+
 /** Thrown when a worker's model stream ends in error/aborted/max-tokens. */
 export class WorkerStreamError extends Error {
   constructor(
@@ -78,6 +115,13 @@ function fail(finish: FinishReason): never {
 
 /** Run the loop; resolves when the model stops without further tool calls. */
 export async function runWorkerLoop(ctx: Context, options: WorkerLoopOptions): Promise<WorkerLoopResult> {
+  const controller = new AbortController()
+  const forwardAbort = (): void => { controller.abort(options.signal?.reason) }
+  if (options.signal?.aborted) forwardAbort()
+  else options.signal?.addEventListener('abort', forwardAbort, { once: true })
+  const deadline = setTimeout(() => controller.abort(new WorkerTimeoutError()), WORKER_TIMEOUT_MS)
+  deadline.unref?.()
+
   const messages: Message[] = [
     createUserMessage({
       content: [{ type: 'text', text: options.userText }],
@@ -89,7 +133,8 @@ export async function runWorkerLoop(ctx: Context, options: WorkerLoopOptions): P
 
   let turns = 0
   let finish: FinishReason = { kind: 'stop' }
-  while (turns < maxTurns) {
+  try {
+    while (turns < maxTurns) {
     turns += 1
     const assembler = new BlockAssembler()
     const stream = ctx.llm.stream({
@@ -102,7 +147,23 @@ export async function runWorkerLoop(ctx: Context, options: WorkerLoopOptions): P
       ...(options.reasoningEffort !== undefined ? { reasoningEffort: options.reasoningEffort as never } : {}),
       signal: options.signal,
     })
-    for await (const chunk of stream) assembler.push(chunk)
+    const iterator = stream[Symbol.asyncIterator]()
+    try {
+      while (true) {
+        const step = await withWorkerAbort(iterator.next(), controller.signal)
+        if (step.done) break
+        assembler.push(step.value)
+      }
+    } catch (error) {
+      try {
+        const closing = iterator.return?.()
+        void closing?.catch(() => {})
+      } catch {
+        // Best-effort generator cleanup; the original abort is authoritative.
+      }
+      throw error
+    }
+    controller.signal.throwIfAborted()
     finish = assembler.finish
     if (finish.kind === 'error' || finish.kind === 'aborted' || finish.kind === 'max-tokens') fail(finish)
 
@@ -118,6 +179,11 @@ export async function runWorkerLoop(ctx: Context, options: WorkerLoopOptions): P
     // Execute any tool calls regardless of the finish label: some adapters
     // report 'stop' with calls pending. A call-free response ends the loop.
     if (calls.length === 0) break
+    // A tool call on the last permitted turn means the model never finished
+    // reviewing the chunk. Returning accumulated records here would let the
+    // caller advance coverage past source the model explicitly had not done
+    // with. Fail the run instead so the backlog remains eligible for retry.
+    if (turns >= maxTurns) throw new WorkerTurnLimitError(maxTurns)
 
     for (const call of calls) {
       const tool = options.tools.find((candidate) => candidate.schema.name === call.name)
@@ -128,7 +194,10 @@ export async function runWorkerLoop(ctx: Context, options: WorkerLoopOptions): P
         isError = true
       } else {
         try {
-          text = await tool.execute(JSON.parse(call.arguments))
+          text = await withWorkerAbort(
+            Promise.resolve().then(() => tool.execute(JSON.parse(call.arguments))),
+            controller.signal,
+          )
         } catch (error) {
           text = `Tool error: ${error instanceof Error ? error.message : String(error)}`
           isError = true
@@ -144,5 +213,11 @@ export async function runWorkerLoop(ctx: Context, options: WorkerLoopOptions): P
     }
   }
 
-  return { turns, finish }
+    return { turns, finish }
+  } finally {
+    clearTimeout(deadline)
+    options.signal?.removeEventListener('abort', forwardAbort)
+    // Stop an adapter that is still settling after an outer abort race.
+    controller.abort()
+  }
 }
