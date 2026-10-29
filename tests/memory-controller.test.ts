@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { OmMemoryController, type ConnectionRpcLike } from '../src/client/memory.ts'
+import { MEMORY_RUN_SKIPPED, OmMemoryController, type ConnectionRpcLike } from '../src/client/memory.ts'
 
 type Handler = (request: Record<string, unknown>) => unknown
 
@@ -105,6 +105,16 @@ describe('OmMemoryController', () => {
       'observationalMemory/view',
       'observationalMemory/logs',
     ])
+  })
+
+  it('reports a host-declined run without refreshing as though it succeeded', async () => {
+    const rpc = fakeRpc({ 'observationalMemory/run': () => ({ ran: false }) })
+    const controller = new OmMemoryController(rpc, 'session-1')
+    await controller.run()
+    expect(controller.getSnapshot().running).toBe(false)
+    expect(controller.getSnapshot().error).toBe(MEMORY_RUN_SKIPPED)
+    expect(controller.getSnapshot().failedAction).toBe('run')
+    expect(rpc.calls).toEqual(['observationalMemory/run'])
   })
 
   it('flags the run as in flight until the host settles', async () => {

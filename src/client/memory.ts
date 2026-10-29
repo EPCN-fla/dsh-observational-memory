@@ -21,6 +21,9 @@ export interface ConnectionRpcLike {
 
 export type MemoryViewMode = 'visible' | 'full'
 
+/** Internal state sentinel rendered through the locale, not as a server error. */
+export const MEMORY_RUN_SKIPPED = 'observational-memory/run-skipped'
+
 export interface OmMemoryState {
   /** First-load phase; later refreshes keep showing the previous text. */
   phase: 'loading' | 'ready' | 'error'
@@ -169,6 +172,10 @@ export class OmMemoryController {
     if (epoch !== this.runEpoch) return
     if (!run.ok) {
       this.publish({ ...this.current, running: false, error: run.message, failedAction: 'run' })
+      return
+    }
+    if (!run.value.ran) {
+      this.publish({ ...this.current, running: false, error: MEMORY_RUN_SKIPPED, failedAction: 'run' })
       return
     }
     // Re-pull whatever the run produced. refresh() keeps the flag (its

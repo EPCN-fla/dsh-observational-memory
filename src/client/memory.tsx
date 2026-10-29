@@ -6,7 +6,7 @@
  */
 import { useEffect, useRef, useState } from 'react'
 import type { LocaleKey } from './locales.ts'
-import type { MemoryViewMode, OmMemoryState } from './memory.ts'
+import { MEMORY_RUN_SKIPPED, type MemoryViewMode, type OmMemoryState } from './memory.ts'
 import css from './memory.module.css'
 
 export type MemoryTranslate = (key: LocaleKey, params?: Record<string, string | number>) => string
@@ -151,7 +151,9 @@ export function MemoryView(props: MemoryViewProps) {
       ) : null}
       {state.error !== undefined ? (
         <p className={css.error} role="status">
-          {t(state.failedAction === 'run' ? 'memory.runFailed' : 'memory.error')}: {state.error}
+          {state.error === MEMORY_RUN_SKIPPED
+            ? t('memory.runSkipped')
+            : <>{t(state.failedAction === 'run' ? 'memory.runFailed' : 'memory.error')}: {state.error}</>}
         </p>
       ) : null}
       {state.phase === 'loading' ? (

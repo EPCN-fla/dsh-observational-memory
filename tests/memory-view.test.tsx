@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { createElement } from 'react'
 import { MemoryView } from '../src/client/memory.tsx'
 import { en, zh } from '../src/client/locales.ts'
-import type { OmMemoryState } from '../src/client/memory.ts'
+import { MEMORY_RUN_SKIPPED, type OmMemoryState } from '../src/client/memory.ts'
 
 function stateWith(overrides: Partial<OmMemoryState> = {}): OmMemoryState {
   return {
@@ -72,6 +72,12 @@ describe('MemoryView', () => {
     expect(html).not.toContain('加载失败')
     expect(render(stateWith({ error: 'boom', failedAction: 'run' }), en)).toContain('Run failed')
     expect(render(stateWith({ error: 'boom', failedAction: 'refresh' }), en)).toContain('Load failed')
+  })
+
+  it('localizes a host-declined run', () => {
+    const html = render(stateWith({ error: MEMORY_RUN_SKIPPED, failedAction: 'run' }), en)
+    expect(html).toContain('Not run: another memory task is active')
+    expect(html).not.toContain(MEMORY_RUN_SKIPPED)
   })
 
   it('marks the active view mode', () => {
