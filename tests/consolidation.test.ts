@@ -672,6 +672,21 @@ describe('consolidation scheduling', () => {
     }
   })
 
+  it('releases the session without writes when a manual run is cancelled', async () => {
+    const events = longConversation(20)
+    const { ctx } = fakeCtx([{ text: 'unused' }])
+    ctx.llm.stream = async function* () { await new Promise(() => {}) }
+    const runtime = new OmRuntime(PlainConfig({ observeAfterTokens: 10, storageDir: dir }), { onError: () => {} })
+    const controller = new AbortController()
+    const pending = runConsolidationNow(ctx, runtime, fakeSession(events), controller.signal)
+    await vi.waitFor(() => expect(runtime.consolidationInFlight.has('s1')).toBe(true))
+    controller.abort(new Error('remote cancelled'))
+    await expect(pending).resolves.toBe(false)
+    expect(runtime.consolidationInFlight.size).toBe(0)
+    expect(runtime.store.entries('s1')).toHaveLength(0)
+    expect(runtime.lastObserverError.get('s1')).toContain('remote cancelled')
+  })
+
   it('keeps active slots owned across disposal cleanup and rejects stale releases', () => {
     const runtime = new OmRuntime(PlainConfig({ storageDir: dir }), { onError: () => {} })
     const first = runtime.claimConsolidation('s1')!

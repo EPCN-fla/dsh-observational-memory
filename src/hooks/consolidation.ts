@@ -48,6 +48,8 @@ type ResolvedModel = Extract<ResolveResult, { ok: true }>
 /** Pipeline switches: `force` bypasses the token clocks (manual runs only). */
 export interface ConsolidationOptions {
   force?: boolean
+  /** Manual caller cancellation; automatic runs still have the worker deadline. */
+  signal?: AbortSignal
 }
 
 type Notify = (level: 'info' | 'warning', message: string) => void
@@ -167,7 +169,12 @@ function releaseDisposedSession(ctx: Context, runtime: OmRuntime, session: Sessi
  * Returns false for subagent sessions (no memory of their own) and when a
  * run is already active for the session.
  */
-export async function runConsolidationNow(ctx: Context, runtime: OmRuntime, session: Session): Promise<boolean> {
+export async function runConsolidationNow(
+  ctx: Context,
+  runtime: OmRuntime,
+  session: Session,
+  signal?: AbortSignal,
+): Promise<boolean> {
   runtime.refreshConfig()
   if (session.header.origin === 'subagent') return false
   const sessionId: string = session.id
@@ -179,8 +186,7 @@ export async function runConsolidationNow(ctx: Context, runtime: OmRuntime, sess
     await runtime.ensureInherited(ctx, session)
     runtime.clearConsolidationRetry(sessionId)
     runtime.clearStageErrors(sessionId)
-    await runConsolidationPipeline(ctx, runtime, session, { force: true })
-    return true
+    return runConsolidationPipeline(ctx, runtime, session, { force: true, signal })
   } finally {
     const released = runtime.releaseConsolidation(sessionId, owner)
     releaseDisposedSession(ctx, runtime, session)
@@ -243,7 +249,7 @@ export async function runConsolidationPipeline(
   }
 
   try {
-    await runDropperStage(ctx, runtime, session, resolveModel, notify, reflectorResult.reflections, reflectorResult.coverageSeq)
+    await runDropperStage(ctx, runtime, session, resolveModel, notify, reflectorResult.reflections, reflectorResult.coverageSeq, options.signal)
   } catch (error) {
     const { message, consecutiveFailures } = runtime.recordStageError(sessionId, 'dropper', error)
     runtime.debug(sessionId, 'dropper.error', { errorMessage: message, consecutiveFailures })
@@ -306,12 +312,14 @@ async function runObserverStage(
       chunk,
       allowedSourceEventSeqs: sourceEventSeqs,
       maxTurns: config.agentMaxTurns,
+      signal: options.signal,
     })
     for (const observation of observations ?? []) {
       if (!accumulated.has(observation.id)) accumulated.set(observation.id, observation)
     }
   }
   const observations = Array.from(accumulated.values())
+  options.signal?.throwIfAborted()
   // The model call itself settled: an override-path success re-arms a
   // suspended override, whatever the verdict.
   runtime.noteWorkerSuccess(sessionId, resolved.viaOverride)
@@ -333,6 +341,7 @@ async function runObserverStage(
   }
   runtime.clearObserverEmpties(sessionId)
 
+  options.signal?.throwIfAborted()
   const record = buildObservationsRecorded(observations, coversUpToSeq)
   if (!record) return
   await runtime.store.append(sessionId, record)
@@ -374,10 +383,13 @@ async function runReflectorStage(
     reflections: folded.reflections,
     observations: folded.activeObservations,
     maxTurns: config.agentMaxTurns,
+    signal: options.signal,
   })
+  options.signal?.throwIfAborted()
   runtime.noteWorkerSuccess(sessionId, resolved.viaOverride)
   if (!reflections || reflections.length === 0) return { reflections: [] }
 
+  options.signal?.throwIfAborted()
   const record = buildReflectionsRecorded(reflections, observationCoverageSeq)
   if (!record) return { reflections: [] }
   await runtime.store.append(sessionId, record)
@@ -405,6 +417,7 @@ async function runDropperStage(
   notify: Notify,
   sameRunReflections: Reflection[],
   sameRunReflectionCoverageSeq: number | undefined,
+  signal?: AbortSignal,
 ): Promise<void> {
   if (sameRunReflectionCoverageSeq === undefined || sameRunReflections.length === 0) {
     return
@@ -440,13 +453,16 @@ async function runDropperStage(
     observations: folded.activeObservations,
     targetTokens,
     maxTurns: config.agentMaxTurns,
+    signal,
   })
+  signal?.throwIfAborted()
   runtime.noteWorkerSuccess(sessionId, resolved.viaOverride)
 
   const coversUpToSeq = earlierSeq(observationCoverageSeq, sameRunReflectionCoverageSeq)
   const record = coversUpToSeq !== undefined && droppedIds ? buildObservationsDropped(droppedIds, coversUpToSeq) : undefined
   runtime.debug(sessionId, 'dropper.append', { droppedIdsCount: droppedIds?.length ?? 0, coversUpToSeq })
   if (record) {
+    signal?.throwIfAborted()
     await runtime.store.append(sessionId, record)
     notify('info', `${record.observationIds.length} observation${record.observationIds.length === 1 ? '' : 's'} dropped from active memory`)
   }

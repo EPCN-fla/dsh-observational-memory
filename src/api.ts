@@ -182,7 +182,7 @@ export class OmApiService extends TypertRemoteService {
     const sessionId = sessionIdOf(request)
     const session = attachedSession(this.ctx, sessionId)
     // runConsolidationNow refreshes the live configuration itself at the top.
-    const ran = await runConsolidationNow(this.ctx, this.runtime, session)
+    const ran = await runConsolidationNow(this.ctx, this.runtime, session, signal)
     return { ran }
   }
 
