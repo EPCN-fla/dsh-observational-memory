@@ -55,7 +55,7 @@ test('every published host in the peer compatibility window has an executable ma
     '0.1.5-rc.2', '0.1.5-rc.3',
     '0.1.7-rc.1', '0.1.7-rc.2',
     '0.2.0-rc.1', '0.2.0-rc.2',
-    '0.2.1-rc.1', '0.2.1-rc.2', '0.2.1-rc.3', '0.2.1-rc.4',
+    '0.2.1-rc.1', '0.2.1-rc.2', '0.2.1-rc.3', '0.2.1-rc.4', '0.2.1-rc.5',
   ])
   // 0.1.5-rc.4 remains in the peer declaration but was never published to npm.
   assert.equal(manifest.dshCompatibility['0.1.5-rc.4'], undefined)
@@ -75,7 +75,7 @@ test('verification records failures, continues independent checks and summarizes
   writeFileSync(npm, `#!${process.execPath}\nprocess.exit(process.argv.includes(process.env.FAIL_STEP) ? 1 : 0)\n`)
   chmodSync(npm, 0o755)
   const major = process.versions.node.split('.')[0]
-  const env = { PATH: `${root}/bin:${process.env.PATH}`, DSH_TEST_VERSION: '0.2.1-rc.4', FAIL_STEP: 'typecheck' }
+  const env = { PATH: `${root}/bin:${process.env.PATH}`, DSH_TEST_VERSION: '0.2.1-rc.5', FAIL_STEP: 'typecheck' }
   const result = run(root, 'ci-verify.mjs', ['verify', major], env)
   assert.equal(result.status, 1, result.stderr)
   let report = JSON.parse(readFileSync(join(root, `artifacts/ci/node-${major}.json`)))
