@@ -79,8 +79,10 @@ export async function forkRollbackSession(
   anchorSeq: number,
   text: string,
   restoreDraft: (scope: unknown, text: string) => void,
-  notify: (failure: 'fork' | 'restore') => void,
+  notify: (failure: 'fork' | 'inherit' | 'restore') => void,
   openSession?: (childId: string) => void,
+  /** Prove and copy the parent's ledger on hosts that omit ordinary-fork lineage. */
+  inheritFork?: (childId: string) => Promise<void>,
 ): Promise<void> {
   let createdChildId: string | undefined
   let childId: string
@@ -100,6 +102,13 @@ export async function forkRollbackSession(
       return
     }
     childId = createdChildId
+  }
+
+  try {
+    await inheritFork?.(childId)
+  } catch {
+    notify('inherit')
+    return
   }
 
   const open = openSession ?? ((childId: string) => sessions.open(childId))

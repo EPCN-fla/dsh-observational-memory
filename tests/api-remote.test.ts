@@ -25,7 +25,7 @@ describe('Observational Memory Remote authorization', () => {
     } catch {
       supportsSessionResources = false
     }
-    for (const method of ['status', 'view', 'run', 'logs']) {
+    for (const method of ['status', 'view', 'run', 'logs', 'inherit']) {
       const reader = marker(service, method).resources?.session
       if (!supportsSessionResources) {
         // Legacy Typert has no resource-map contract; remoteForSession must
@@ -34,7 +34,12 @@ describe('Observational Memory Remote authorization', () => {
         continue
       }
       expect(reader, `${method} must not fall back to global authorization`).toBeTypeOf('function')
-      expect(reader?.({ sessionId: 'session-victim' }, undefined)).toBe('session-victim')
+      if (method === 'inherit') {
+        expect(reader?.({ sessionId: 'session-victim', sourceSessionId: 'session-source' }, undefined))
+          .toEqual(['session-victim', 'session-source'])
+      } else {
+        expect(reader?.({ sessionId: 'session-victim' }, undefined)).toBe('session-victim')
+      }
     }
   })
 })

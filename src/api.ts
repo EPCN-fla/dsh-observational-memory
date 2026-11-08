@@ -36,6 +36,13 @@ export interface OmViewRequest extends OmSessionRequest {
   mode?: ViewMode
 }
 
+export interface OmForkRequest extends OmSessionRequest {
+  /** Source of the ordinary rollback fork; DSH ≥0.2.2 no longer persists it. */
+  sourceSessionId: SessionId
+  /** Exact inclusive source event seq used as the fork cut. */
+  atSeq: number
+}
+
 export interface OmLogsRequest extends OmSessionRequest {
   /** Tail bound; defaults to {@link DEFAULT_LOG_LINES}. */
   maxLines?: number
@@ -53,6 +60,11 @@ export interface OmLogsValue extends OmTextValue {
 export interface OmRunValue {
   /** Whether this call ran the pipeline (false: busy, or not a memory session). */
   ran: boolean
+}
+
+export interface OmInheritanceValue {
+  /** False when this runtime had already completed the child's explicit inheritance. */
+  inherited: boolean
 }
 
 /** Bounded log tail: enough for a debugging session, small enough for RPC. */
@@ -121,6 +133,21 @@ export function remoteForSession(name: 'status' | 'view' | 'run' | 'logs'): OmRe
     }) => OmRemoteDecorator)({ name, resources: { session: request => request.sessionId } })
   } catch {
     return Remote(name) as OmRemoteDecorator
+  }
+}
+
+/** Ordinary fork inheritance reads source and writes child: authorize both. */
+export function remoteForFork(): OmRemoteDecorator {
+  try {
+    return (Remote as unknown as (options: {
+      name: string
+      resources: { session: (request: OmForkRequest) => readonly SessionId[] }
+    }) => OmRemoteDecorator)({
+      name: 'inherit',
+      resources: { session: request => [request.sessionId, request.sourceSessionId] },
+    })
+  } catch {
+    return Remote('inherit') as OmRemoteDecorator
   }
 }
 
@@ -201,6 +228,42 @@ export class OmApiService extends TypertRemoteService {
     // runConsolidationNow refreshes the live configuration itself at the top.
     const ran = await runConsolidationNow(this.ctx, this.runtime, session, signal)
     return { ran }
+  }
+
+  /**
+   * Copy rollback memory through an exact source prefix. DSH ≥0.2.2 persists
+   * no ordinary-fork parent, so the client supplies the relationship and the
+   * Host proves it against both live event logs before touching the ledger.
+   */
+  @remoteForFork()
+  async inherit(request: OmForkRequest, signal?: AbortSignal): Promise<OmInheritanceValue> {
+    const sessionId = sessionIdOf(request)
+    const sourceSessionId = sessionIdOf({ sessionId: request.sourceSessionId })
+    const atSeq = request.atSeq
+    if (sourceSessionId === sessionId || !Number.isSafeInteger(atSeq) || atSeq < 0) {
+      throw new RemoteError('gateway/bad-request', 'inherit requires a distinct source and a non-negative safe-integer atSeq', {})
+    }
+    this.runtime.refreshConfig()
+    const session = attachedSession(this.ctx, sessionId)
+    const source = attachedSession(this.ctx, sourceSessionId)
+    if (session.header.origin === 'subagent' || source.header.origin === 'subagent' || session.header.isSeeded !== true) {
+      throw new RemoteError('gateway/bad-request', 'inherit accepts only an ordinary seeded fork', {})
+    }
+    if (session.inheritedEventCount !== atSeq + 1) {
+      throw new RemoteError('gateway/bad-request', 'atSeq does not match the child inherited event count', {})
+    }
+    const childEvents = session.snapshotEvents()
+    const sourceEvents = source.snapshotEvents()
+    if (childEvents.length <= atSeq || sourceEvents.length <= atSeq) {
+      throw new RemoteError('gateway/bad-request', 'fork prefix is unavailable', {})
+    }
+    for (let index = 0; index <= atSeq; index++) {
+      if (JSON.stringify(childEvents[index]) !== JSON.stringify(sourceEvents[index])) {
+        throw new RemoteError('gateway/bad-request', `fork prefix diverges at event ${index}`, {})
+      }
+    }
+    signal?.throwIfAborted()
+    return { inherited: await this.runtime.inheritFork(this.ctx, session, sourceSessionId, atSeq) }
   }
 
   /** Bounded tail of the session's debug NDJSON, when recording is on. */

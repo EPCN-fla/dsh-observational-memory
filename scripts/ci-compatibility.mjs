@@ -19,8 +19,9 @@ export function readCompatibility(path = 'package.json') {
     if (!config || typeof config !== 'object' || Array.isArray(config)
       || typeof config.cordis !== 'string' || !/^~?\d+\.\d+\.\d+$/.test(config.cordis)
       || typeof config.schemastery !== 'string' || !exactVersion.test(config.schemastery)
-      || Object.keys(config).some(key => !['cordis', 'schemastery', 'overrides'].includes(key))) {
-      throw new Error(`dshCompatibility ${version} requires exact cordis/schemastery versions and optional exact overrides`)
+      || (config.node !== undefined && (typeof config.node !== 'string' || !/^>=\d+\.\d+\.\d+$/.test(config.node)))
+      || Object.keys(config).some(key => !['cordis', 'schemastery', 'overrides', 'node'].includes(key))) {
+      throw new Error(`dshCompatibility ${version} requires exact cordis/schemastery versions and optional exact overrides/Node floor`)
     }
     if (config.overrides !== undefined) {
       if (!config.overrides || typeof config.overrides !== 'object' || Array.isArray(config.overrides)
@@ -30,6 +31,14 @@ export function readCompatibility(path = 'package.json') {
     }
   }
   return { manifest, entries }
+}
+
+/** Whether a host cohort supports a Node major used by the two CI legs. */
+export function supportsNodeMajor(config, major) {
+  if (config.node === undefined) return true
+  const minimum = config.node.match(/^>=(\d+)\.\d+\.\d+$/)
+  if (!minimum) throw new Error(`Unsupported Node requirement ${config.node}`)
+  return major >= Number(minimum[1])
 }
 
 function main() {
@@ -64,7 +73,10 @@ function main() {
     }
     if (changed) writeFileSync('package.json', `${JSON.stringify(manifest, null, 2)}\n`)
     console.log(`changed=${changed}`)
-    if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `changed=${changed}\n`)
+    if (process.env.GITHUB_OUTPUT) {
+      appendFileSync(process.env.GITHUB_OUTPUT, `changed=${changed}\n`)
+      appendFileSync(process.env.GITHUB_OUTPUT, `node22=${supportsNodeMajor(entries[version], 22)}\n`)
+    }
   } else {
     throw new Error('Usage: node scripts/ci-compatibility.mjs matrix | select <version>')
   }

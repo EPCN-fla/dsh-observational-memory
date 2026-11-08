@@ -106,6 +106,7 @@ export const zh = {
   'message.rollbackUnavailable': '仅可回退带文本、且无附件的非首轮消息',
   'message.rollbackBlocked': '回退点不在已加载的历史范围内；请先向上滚动加载更早的消息。',
   'message.rollbackFailed': '回退失败：未能分叉会话。',
+  'message.rollbackInheritanceFailed': '回退分支已创建，但无法继承切点前的记忆。',
   'message.rollbackRestoreFailed': '回退分支已创建，但无法恢复原消息或打开分支。',
 } as const
 
@@ -211,5 +212,6 @@ export const en: Record<LocaleKey, string> = {
   'message.rollbackUnavailable': 'Only text-only messages past the first turn can roll back',
   'message.rollbackBlocked': 'The rollback point is outside the loaded history; scroll up to load older messages first.',
   'message.rollbackFailed': 'Rollback failed: the session could not be forked.',
+  'message.rollbackInheritanceFailed': 'The rollback branch was created, but memory before the cut could not be inherited.',
   'message.rollbackRestoreFailed': 'The rollback branch was created, but the original message could not be restored or opened.',
 }

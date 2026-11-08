@@ -61,6 +61,7 @@ The correspondence matrix between plugin versions and DSH versions is as follows
 
 | Plugin version | Minimum compatible DSH version | Highest compatible DSH version |
 | --- | --- | --- |
+| 0.4.4 | 0.1.5-rc.2 | 0.2.2-rc.1 |
 | 0.4.3 | 0.1.5-rc.2 | 0.2.1-rc.5 |
 | 0.4.2 | 0.1.5-rc.2 | 0.2.1-rc.4 |
 | 0.4.1 | 0.1.5-rc.2 | 0.2.1-rc.2 |
@@ -71,7 +72,7 @@ The correspondence matrix between plugin versions and DSH versions is as follows
 | 0.1.3 | 0.1.5-rc.2 | 0.1.5-rc.2 |
 | 0.1.2 | 0.1.5-rc.2 | 0.1.5-rc.2 |
 
-On 0.1.7 and later the plugin serves the profile-owned live configuration; on 0.1.5 it falls back to the legacy settings.yaml section, and the legacy document is imported automatically on the first 0.1.7 boot.
+On 0.1.7 and later the plugin serves the profile-owned live configuration; on 0.1.5 it falls back to the legacy settings.yaml section, and the legacy document is imported automatically on the first 0.1.7 boot. DSH 0.2.2-rc.1 requires Node.js `>=24.9.0`; older DSH cohorts retain their original Node support.
 
 Add the plugin to a profile through the DSH CLI (`web` shown here; substitute as needed). The package ships a `cordis.patch.yml`, so the composer mounts the host half automatically and serves `/plugins/dsh-observational-memory/client.js` to the Web client — no extra composition wiring.
 
@@ -140,7 +141,7 @@ The agent can call `recall(id)` with a 12-character lowercase hex memory id to r
 
 Every user message (steering messages included) gains a **rollback** button left of its copy button: clicking it forks the session at the completed-turn boundary right before that message, opens the child session, and restores the message text into its composer — ready to edit and resend. The operation is non-destructive: the source session keeps its history on its own branch.
 
-On its first memory touch the new branch **inherits** the source session's memory through the fork point (observations, reflections, drop records and visible memory), so a rollback never restarts memory from scratch; records covering only the abandoned branch (events past the fork point) stay behind. When the immediate parent's ledger is empty, the walk continues up the fork lineage to the nearest usable ledger, so chained rollbacks still inherit. Passive mode does not affect inheritance.
+The new branch **inherits** the source session's memory through the fork point (observations, reflections, drop records and visible memory), so a rollback never restarts memory from scratch; records covering only the abandoned branch (events past the fork point) stay behind. DSH 0.2.2 no longer persists an ordinary fork's source, so this plugin explicitly inherits after creating the rollback and before restoring its draft through a Host RPC that validates the shared event prefix. Older hosts retain the first-touch Header-lineage walk. Passive mode does not affect inheritance.
 
 DSH can only cut sessions at turn boundaries, so the button stays disabled (with an explanatory tooltip) for first-turn messages (no earlier boundary to roll back to), messages with attachments (a draft cannot restore uploads), and textless messages. Unloading the plugin restores the built-in user message rendering.
 
@@ -202,7 +203,7 @@ Deployments can also preset composition-layer values through the plugin's cordis
 - **Preset differences**: in the Web composition the compaction engine lives inside the agent preset's isolated realm; presets without compaction (e.g. `minimal`) quietly skip the proactive trigger (the ledger and compaction render are unaffected).
 - **Ratio mode's window dependency**: when the session model's context window is unresolvable in ratio mode, the proactive trigger stays disabled instead of falling back to the static threshold.
 - **Headless runs**: the Memory tab is fed by Typert Remote endpoints; without an API Gateway (headless runs) the tab is unavailable, while everything else (ledger, compaction render, proactive trigger, recall tool) keeps working.
-- **Rollback implementation**: the button replaces the `user`/`steering` renderers of the `conversation.chat.node` slot (priority -1 shadows the built-ins). If another plugin shadows the same keys, the registration clash affects only those renderers, not the rest of this plugin.
+- **Rollback implementation**: the button replaces the `user`/`steering` renderers of the `conversation.chat.node` slot (priority -1 shadows the built-ins). If another plugin shadows the same keys, the registration clash affects only those renderers, not the rest of this plugin. On DSH 0.2.2, `conversation.chat.user.before` remains owned by the built-in declaration; a replacement entry cannot redeclare it or receive its `renderSlotChain`, so message-source decorations from other plugins do not appear on rows rendered by this plugin. Ordinary forks created through other DSH 0.2.2 entry points have no durable source field; only this plugin's rollback path can prove and inherit its source ledger.
 - **Token estimates**: all token counts are estimates (~4 chars/token) and can drift on non-ASCII content.
 - **Ledger cleanup**: ledger files live in the plugin directory (default `$DSH_HOME/observational-memory`); uninstalling the plugin does not remove them — delete them manually if unwanted.
 

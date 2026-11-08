@@ -81,6 +81,26 @@ describe('OmRuntime.resolveModel override suspension', () => {
     expect(calls).toBe(2)
   })
 
+  it('prefers a pending Agent model selection over the previous request header', async () => {
+    const runtime = new OmRuntime(PlainConfig({ storageDir: dir }), { onError: () => {} })
+    const calls: string[] = []
+    const ctx = fakeCtx(calls)
+    const agent = {
+      model: { current: () => ({ provider: 'next', model: 'pending', reasoningEffort: 'high' }) },
+      options: { provider: 'option', model: 'fallback' },
+    } as never
+
+    const resolved = await runtime.resolveModel(ctx, session, agent)
+    expect(resolved).toMatchObject({
+      ok: true,
+      target: { provider: 'next', model: 'pending', reasoningEffort: 'high' },
+      contextWindow: 200_000,
+      viaOverride: false,
+    })
+    expect(await runtime.sessionContextWindow(ctx, session, agent)).toBe(200_000)
+    expect(calls).toEqual(['next/pending', 'next/pending'])
+  })
+
   it('memoizes session context windows per route', async () => {
     const runtime = new OmRuntime(PlainConfig({ storageDir: dir }), { onError: () => {} })
     const calls: string[] = []

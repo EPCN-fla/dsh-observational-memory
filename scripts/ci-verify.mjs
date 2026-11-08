@@ -2,11 +2,12 @@
 import { spawnSync } from 'node:child_process'
 import { mkdirSync, readFileSync, writeFileSync, appendFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { readCompatibility } from './ci-compatibility.mjs'
+import { readCompatibility, supportsNodeMajor } from './ci-compatibility.mjs'
 
 const [mode, major] = process.argv.slice(2)
 const directory = resolve('artifacts/ci')
-const versions = Object.keys(readCompatibility().entries)
+const entries = readCompatibility().entries
+const versions = Object.keys(entries)
 const version = process.env.DSH_TEST_VERSION
 if (!versions.includes(version)) throw new Error('DSH_TEST_VERSION must name a supported exact version')
 
@@ -15,8 +16,15 @@ if (mode === 'summary') {
     '| Node | Setup | Verification | Install | Typecheck | Tests | Scripts | Build | Package |',
     '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |']
   for (const node of ['22', '24']) {
+    if (!supportsNodeMajor(entries[version], Number(node))) {
+      lines.push(`| ${node} | not required | unsupported | — | — | — | — | — | — |`)
+      continue
+    }
     let report
     try { report = JSON.parse(readFileSync(`${directory}/node-${node}.json`, 'utf8')) } catch { /* A failed setup has no report. */ }
+    // A shared workspace can retain another matrix leg's report. Never present
+    // that stale evidence as the selected DSH cohort's verification result.
+    if (report?.dsh !== version) report = undefined
     const status = key => report?.steps.find(step => step.name === key)?.status ?? 'not run'
     lines.push(`| ${report?.node ?? node} | ${process.env[`SETUP_${node}`] ?? 'unknown'} | ${process.env[`VERIFY_${node}`] ?? 'unknown'} | ${status('install')} | ${status('typecheck')} | ${status('test')} | ${status('scripts')} | ${status('build')} | ${status('package')} |`)
   }

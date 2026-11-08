@@ -81,6 +81,8 @@ export interface UserMessageNodeLike {
   content: readonly unknown[]
   referenceLabels?: readonly string[]
   skillNames?: readonly string[]
+  /** DSH ≥0.2.2: first admitted steering row in one claim batch. */
+  batchStart?: boolean
 }
 
 /** The slot owner share this renderer consumes (mirrors ChatNodeOwnerProps).
@@ -95,6 +97,7 @@ export interface UserMessageNodeLike {
 export interface UserMessageOwnerLike {
   node: {
     anchorSeq: number
+    kind?: 'user' | 'steering'
     location: { kind: string; turn?: { turn: number } }
     data: UserMessageNodeLike
   }
@@ -305,6 +308,7 @@ export const OmUserMessageNodeView = memo(function OmUserMessageNodeView(
 ) {
   const { node, t } = props
   const data = node.data
+  const batchStart = node.kind === 'steering' && data.batchStart === true
   const { text, attachments, rest } = contentParts(data.content)
   const [rollbackPending, setRollbackPending] = useState(false)
   const rollbackInFlight = useRef(false)
@@ -358,7 +362,7 @@ export const OmUserMessageNodeView = memo(function OmUserMessageNodeView(
   // own content pipeline, while older hosts retain text and attachments.
   if (props.renderFactorySlot !== undefined) {
     return (
-      <div className={css.userRow}>
+      <div className={css.userRow} data-chat-steering-batch={batchStart ? 'start' : undefined}>
         {props.renderFactorySlot('conversation.chat.user.content', {
           content: {
             text,
@@ -379,7 +383,7 @@ export const OmUserMessageNodeView = memo(function OmUserMessageNodeView(
   }
 
   return (
-    <div className={css.userRow}>
+    <div className={css.userRow} data-chat-steering-batch={batchStart ? 'start' : undefined}>
       <LegacyUserContent {...props} />
       {actions}
     </div>

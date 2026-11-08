@@ -101,7 +101,7 @@ export async function maybeLaunchConsolidation(ctx: Context, runtime: OmRuntime,
   // Inheriting a fork parent's ledger is not a proactive trigger: passive
   // mode keeps it, so a rolled-back branch holds on to the memory it shares
   // with its source even with every background worker disabled.
-  await runtime.ensureInherited(ctx, session)
+  if (!await runtime.ensureInherited(ctx, session)) return
   const config = runtime.config
   const sessionId: string = session.id
   if (config.passive) {
@@ -183,7 +183,7 @@ export async function runConsolidationNow(
   const owner = runtime.claimConsolidation(sessionId)
   if (owner === undefined) return false
   try {
-    await runtime.ensureInherited(ctx, session)
+    if (!await runtime.ensureInherited(ctx, session)) return false
     runtime.clearConsolidationRetry(sessionId)
     runtime.clearStageErrors(sessionId)
     return runConsolidationPipeline(ctx, runtime, session, { force: true, signal })

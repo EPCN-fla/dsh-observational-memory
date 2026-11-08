@@ -185,7 +185,9 @@ export function apply(ctx: Context): void {
       failure => composerNotice(
         sessionId,
         'error',
-        t(failure === 'fork' ? 'message.rollbackFailed' : 'message.rollbackRestoreFailed'),
+        t(failure === 'fork'
+          ? 'message.rollbackFailed'
+          : failure === 'inherit' ? 'message.rollbackInheritanceFailed' : 'message.rollbackRestoreFailed'),
       ),
       childId => {
         // DSH 0.2.1: sessions.open only opens history; uiWorkspace performs
@@ -193,6 +195,14 @@ export function apply(ctx: Context): void {
         // their previous sessions.open fallback through the helper.
         if (uiWorkspace) uiWorkspace.openSession(childId)
         else sessions.open(childId)
+      },
+      async childId => {
+        const result = await ctx.connection.rpc.call('/api', 'observationalMemory/inherit', {
+          args: { request: { sessionId: childId, sourceSessionId: sessionId, atSeq: anchorSeq } },
+        })
+        if (!result.ok) throw new Error(result.error.message)
+        const inherited = (result.value as { inherited?: unknown } | undefined)?.inherited
+        if (typeof inherited !== 'boolean') throw new Error('unexpected observationalMemory/inherit response shape')
       },
     ),
     notifyRollbackBlocked: () => composerNotice(sessionId, 'info', t('message.rollbackBlocked')),
