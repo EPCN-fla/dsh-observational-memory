@@ -164,6 +164,10 @@ Configuration uses its own `observational-memory` namespace, isolated from the r
 | `observationsPoolMaxTokens` | `20000` | Observation-token budget for compaction full-fold pressure |
 | `observationsPoolTargetTokens` | half of max | Active observation pool target maintained by the dropper |
 | `agentMaxTurns` | `16` | Tool-call turn cap for one background worker run |
+| `workerTimeoutMs` | `120000` | Hard deadline in milliseconds for one complete background worker run, including every tool round |
+| `consolidationRetryMaxAttempts` | `5` | Maximum automatic retries after a failed background consolidation pass; `0` disables retries |
+| `consolidationRetryBaseDelayMs` | `1000` | Base delay in milliseconds before the first automatic retry; later retries back off exponentially |
+| `consolidationRetryMaxDelayMs` | `30000` | Upper bound in milliseconds for one automatic retry delay |
 | `model` | session model | Worker model override: `{ provider, id, reasoningEffort? }`; in the settings card, picked from the models added to DSH via cascading provider → model → reasoning-effort dropdowns |
 | `modelFallbackAfterFailures` | `0` | After this many consecutive memory-worker failures, suspend the model override and fall back to the session model; `0` means never. Applies only when a `model` override is configured; the count restarts on an override-path success, a config change, or a session reload |
 | `showWorkerNotifications` | `true` | Log worker progress to the host log (warnings and errors always log) |
@@ -171,7 +175,7 @@ Configuration uses its own `observational-memory` namespace, isolated from the r
 | `debugLog` | `false` | Write per-session NDJSON debug events under the storage directory |
 | `storageDir` | `$DSH_HOME/observational-memory` | Ledger storage root |
 
-Each worker run also has a 120-second overall deadline; timeout or cancellation never advances coverage. Transient automatic-task failures retry with bounded per-session exponential backoff without waiting for another turn. Success, passive mode, session disposal and plugin unload clear retry state.
+Worker timeout or cancellation never advances coverage. Transient automatic-task failures retry with bounded per-session exponential backoff without waiting for another turn. Success, passive mode, session disposal and plugin unload clear retry state. The timeout and retry parameters above are all editable in the settings card.
 
 ### Storage format
 

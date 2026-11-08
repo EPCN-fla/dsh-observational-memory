@@ -59,6 +59,13 @@ const MODE_FIELD: { key: string; labelKey: LocaleKey; hintKey: LocaleKey; option
   options: ['calibrated', 'ratio'],
 }
 
+const ADVANCED_NUMBER_FIELDS: NumberFieldDef[] = [
+  { key: 'workerTimeoutMs', labelKey: 'field.workerTimeoutMs', hintKey: 'field.workerTimeoutMsHint' },
+  { key: 'consolidationRetryMaxAttempts', labelKey: 'field.consolidationRetryMaxAttempts', hintKey: 'field.consolidationRetryMaxAttemptsHint' },
+  { key: 'consolidationRetryBaseDelayMs', labelKey: 'field.consolidationRetryBaseDelayMs', hintKey: 'field.consolidationRetryBaseDelayMsHint' },
+  { key: 'consolidationRetryMaxDelayMs', labelKey: 'field.consolidationRetryMaxDelayMs', hintKey: 'field.consolidationRetryMaxDelayMsHint' },
+]
+
 const BOOLEAN_FIELDS: { key: string; labelKey: LocaleKey; hintKey: LocaleKey }[] = [
   { key: 'passive', labelKey: 'field.passive', hintKey: 'field.passiveHint' },
   { key: 'showWorkerNotifications', labelKey: 'field.showWorkerNotifications', hintKey: 'field.showWorkerNotificationsHint' },
@@ -421,6 +428,7 @@ export function ObservationalMemoryCard(props: ObservationalMemoryCardProps) {
           })}
 
           <h4 className={css.section}>{t('section.advanced')}</h4>
+          {ADVANCED_NUMBER_FIELDS.map(renderNumberField)}
           {BOOLEAN_FIELDS.map((field) => (
             <ToggleField
               key={field.key}

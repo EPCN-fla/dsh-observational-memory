@@ -312,6 +312,7 @@ async function runObserverStage(
       chunk,
       allowedSourceEventSeqs: sourceEventSeqs,
       maxTurns: config.agentMaxTurns,
+      timeoutMs: config.workerTimeoutMs,
       signal: options.signal,
     })
     for (const observation of observations ?? []) {
@@ -383,6 +384,7 @@ async function runReflectorStage(
     reflections: folded.reflections,
     observations: folded.activeObservations,
     maxTurns: config.agentMaxTurns,
+    timeoutMs: config.workerTimeoutMs,
     signal: options.signal,
   })
   options.signal?.throwIfAborted()
@@ -453,6 +455,7 @@ async function runDropperStage(
     observations: folded.activeObservations,
     targetTokens,
     maxTurns: config.agentMaxTurns,
+    timeoutMs: config.workerTimeoutMs,
     signal,
   })
   signal?.throwIfAborted()

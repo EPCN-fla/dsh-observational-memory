@@ -80,15 +80,20 @@ export class OmRuntime {
     const sessionId = session.id
     this.cancelConsolidationRetryTimer(sessionId)
     const attempt = (this.consolidationRetryAttempts.get(sessionId) ?? 0) + 1
-    if (attempt > 5) return
+    const config = this.config
+    if (attempt > config.consolidationRetryMaxAttempts) return
     this.consolidationRetryAttempts.set(sessionId, attempt)
+    const delayMs = Math.min(
+      config.consolidationRetryBaseDelayMs * 2 ** (attempt - 1),
+      config.consolidationRetryMaxDelayMs,
+    )
     const timer = setTimeout(() => {
       this.consolidationRetryTimers.delete(sessionId)
       retry()
-    }, Math.min(1_000 * 2 ** (attempt - 1), 30_000))
+    }, delayMs)
     timer.unref?.()
     this.consolidationRetryTimers.set(sessionId, timer)
-    this.debug(sessionId, 'consolidation.retry_scheduled', { attempt, delayMs: Math.min(1_000 * 2 ** (attempt - 1), 30_000) })
+    this.debug(sessionId, 'consolidation.retry_scheduled', { attempt, delayMs })
   }
 
   /** Stop retrying after success, manual intervention, passive mode or no backlog. */

@@ -34,8 +34,8 @@ declare module '@deepseek-ai/dsh-llm' {
 export const WORKER_TIMEOUT_MS = 120_000
 
 export class WorkerTimeoutError extends Error {
-  constructor() {
-    super(`worker exceeded its ${WORKER_TIMEOUT_MS}ms deadline; coverage was not advanced`)
+  constructor(readonly timeoutMs: number = WORKER_TIMEOUT_MS) {
+    super(`worker exceeded its ${timeoutMs}ms deadline; coverage was not advanced`)
     this.name = 'WorkerTimeoutError'
   }
 }
@@ -91,6 +91,7 @@ export interface WorkerLoopOptions {
   userText: string
   tools: WorkerTool[]
   maxTurns: number
+  timeoutMs?: number
   maxTokens?: number
   reasoningEffort?: string
   signal?: AbortSignal
@@ -119,7 +120,8 @@ export async function runWorkerLoop(ctx: Context, options: WorkerLoopOptions): P
   const forwardAbort = (): void => { controller.abort(options.signal?.reason) }
   if (options.signal?.aborted) forwardAbort()
   else options.signal?.addEventListener('abort', forwardAbort, { once: true })
-  const deadline = setTimeout(() => controller.abort(new WorkerTimeoutError()), WORKER_TIMEOUT_MS)
+  const timeoutMs = options.timeoutMs ?? WORKER_TIMEOUT_MS
+  const deadline = setTimeout(() => controller.abort(new WorkerTimeoutError(timeoutMs)), timeoutMs)
   deadline.unref?.()
 
   const messages: Message[] = [

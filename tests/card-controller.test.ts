@@ -196,6 +196,18 @@ describe('OmCardController', () => {
     expect(state().dirty).toBe(true) // still staged — nothing was written
   })
 
+  it('rejects invalid worker timing and retry drafts before any Host write', async () => {
+    const scope = fakeScope({})
+    const { face, state } = makeController(scope)
+    face.edit('workerTimeoutMs', '0')
+    face.edit('consolidationRetryMaxAttempts', '-1')
+    expect(state().fields.workerTimeoutMs.invalid).toBe(true)
+    expect(state().fields.consolidationRetryMaxAttempts.invalid).toBe(true)
+    face.save()
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(scope.getSnapshot().user).toEqual({})
+  })
+
   it('rejects fractional integer fields before any Host write but allows ratios', async () => {
     const scope = fakeScope({})
     const { face, state } = makeController(scope)
@@ -214,11 +226,18 @@ describe('OmCardController', () => {
     const { face, state } = makeController(scope)
     face.edit('observeAfterTokens', '5000')
     face.edit('passive', 'true')
+    face.edit('workerTimeoutMs', '5000')
+    face.edit('consolidationRetryMaxAttempts', '0')
     face.save()
     await new Promise((resolve) => setTimeout(resolve, 10))
     expect(state().dirty).toBe(false)
     expect(state().failed).toBe(false)
-    expect(scope.getSnapshot().user as Record<string, unknown>).toMatchObject({ observeAfterTokens: 5000, passive: true })
+    expect(scope.getSnapshot().user as Record<string, unknown>).toMatchObject({
+      observeAfterTokens: 5000,
+      passive: true,
+      workerTimeoutMs: 5000,
+      consolidationRetryMaxAttempts: 0,
+    })
   })
 
   it('converges when every staged draft is a no-op', async () => {

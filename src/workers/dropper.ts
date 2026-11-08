@@ -24,6 +24,7 @@ export interface RunDropperOptions {
   observations: Observation[]
   targetTokens: number
   maxTurns: number
+  timeoutMs?: number
   signal?: AbortSignal
 }
 
@@ -162,6 +163,7 @@ export async function runDropper(ctx: Context, options: RunDropperOptions): Prom
     userText,
     tools: [dropObservations],
     maxTurns: options.maxTurns,
+    timeoutMs: options.timeoutMs,
     ...(options.target.maxTokens !== undefined ? { maxTokens: options.target.maxTokens } : {}),
     ...(options.target.reasoningEffort !== undefined ? { reasoningEffort: options.target.reasoningEffort } : {}),
     ...(options.signal !== undefined ? { signal: options.signal } : {}),

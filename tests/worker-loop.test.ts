@@ -91,6 +91,28 @@ describe('runWorkerLoop', () => {
     }
   })
 
+  it('uses the configured whole-run deadline in the timer and error', async () => {
+    vi.useFakeTimers()
+    try {
+      const ctx = {
+        llm: {
+          async *stream() {
+            await new Promise(() => {})
+          },
+        },
+      } as never
+      const pending = runWorkerLoop(ctx, {
+        provider: 'p', model: 'm', system: 's', userText: 'u', tools: [echoTool], maxTurns: 2, timeoutMs: 25,
+      })
+      const assertion = expect(pending).rejects.toThrow('25ms deadline')
+      await vi.advanceTimersByTimeAsync(24)
+      await vi.advanceTimersByTimeAsync(1)
+      await assertion
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('throws WorkerStreamError on a terminal error finish', async () => {
     const { ctx } = fakeLlmCtx([{ finish: 'error' }])
     await expect(

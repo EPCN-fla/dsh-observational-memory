@@ -164,6 +164,10 @@ DSH 只能按轮次边界切分会话，因此按钮在以下情况保持禁用�
 | `observationsPoolMaxTokens` | `20000` | 压缩全量折叠的观察池预算 |
 | `observationsPoolTargetTokens` | 上限的一半 | 清理器维护的活跃观察池目标 |
 | `agentMaxTurns` | `16` | 后台 worker 单次运行的工具调用轮数上限 |
+| `workerTimeoutMs` | `120000` | 后台 worker 单次完整运行的硬超时（毫秒），包含所有工具调用轮次 |
+| `consolidationRetryMaxAttempts` | `5` | 自动后台整理失败后的最大重试次数；`0` 禁用重试 |
+| `consolidationRetryBaseDelayMs` | `1000` | 第一次自动重试的基础延迟（毫秒），后续按指数退避 |
+| `consolidationRetryMaxDelayMs` | `30000` | 单次自动重试延迟上限（毫秒） |
 | `model` | 会话模型 | 记忆 worker 的模型覆盖：`{ provider, id, reasoningEffort? }`；设置卡片中从 DSH 已添加的模型列表按 提供商 → 模型 → 推理强度 逐级下拉选择 |
 | `modelFallbackAfterFailures` | `0` | 记忆 worker 连续失败这么多次后，挂起模型覆盖并回退到会话模型；`0` 表示永不回退。仅在配置了 `model` 覆盖时生效；override 路径成功、修改配置或会话重载后重新计数 |
 | `showWorkerNotifications` | `true` | 在主机日志记录 worker 进度（警告与错误始终记录） |
@@ -171,7 +175,7 @@ DSH 只能按轮次边界切分会话，因此按钮在以下情况保持禁用�
 | `debugLog` | `false` | 在存储目录下写每个会话的 NDJSON 调试事件 |
 | `storageDir` | `$DSH_HOME/observational-memory` | 账本存储根目录 |
 
-每个 worker 单次运行另有 120 秒整体截止时间，超时或取消不会推进覆盖水位。自动任务遇到瞬态失败时按会话进行有界指数退避重试，无需等待新的会话轮次；成功、被动模式、会话销毁或插件卸载会清理重试状态。
+Worker 超时或取消不会推进覆盖水位。自动任务遇到瞬态失败时按会话进行有界指数退避重试，无需等待新的会话轮次；成功、被动模式、会话销毁或插件卸载会清理重试状态。以上超时与重试参数均可在设置卡片中调整。
 
 ### 配置存储格式
 
