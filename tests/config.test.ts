@@ -58,6 +58,10 @@ describe('Config schema', () => {
     expect(() => PlainConfig({ consolidationRetryMaxAttempts: -1 })).toThrow()
     expect(() => PlainConfig({ consolidationRetryBaseDelayMs: 1.5 })).toThrow()
     expect(() => PlainConfig({ consolidationRetryMaxDelayMs: -1 })).toThrow()
+    expect(() => PlainConfig({ workerTimeoutMs: 2_147_483_648 })).toThrow()
+    expect(() => PlainConfig({ consolidationRetryBaseDelayMs: 2_147_483_648 })).toThrow()
+    expect(() => PlainConfig({ consolidationRetryMaxDelayMs: 2_147_483_648 })).toThrow()
+    expect(PlainConfig({ workerTimeoutMs: 2_147_483_647 }).workerTimeoutMs).toBe(2_147_483_647)
   })
 })
 

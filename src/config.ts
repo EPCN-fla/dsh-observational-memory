@@ -157,10 +157,10 @@ const fields = {
   observationsPoolMaxTokens: z.number().step(1).min(1).default(20_000),
   observationsPoolTargetTokens: z.number().step(1).min(1),
   agentMaxTurns: z.number().step(1).min(1).default(16),
-  workerTimeoutMs: z.number().step(1).min(1).default(120_000),
+  workerTimeoutMs: z.number().step(1).min(1).max(2_147_483_647).default(120_000),
   consolidationRetryMaxAttempts: z.number().step(1).min(0).default(5),
-  consolidationRetryBaseDelayMs: z.number().step(1).min(0).default(1_000),
-  consolidationRetryMaxDelayMs: z.number().step(1).min(0).default(30_000),
+  consolidationRetryBaseDelayMs: z.number().step(1).min(0).max(2_147_483_647).default(1_000),
+  consolidationRetryMaxDelayMs: z.number().step(1).min(0).max(2_147_483_647).default(30_000),
   // An absent model override must stay absent: schemastery objects resolve
   // even when the key is missing, so an `undefined` default marks it optional
   // (cast: `default(value: T)` predates optional objects).
