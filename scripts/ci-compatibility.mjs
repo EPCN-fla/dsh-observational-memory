@@ -33,12 +33,30 @@ export function readCompatibility(path = 'package.json') {
   return { manifest, entries }
 }
 
-/** Whether a host cohort supports a Node major used by the two CI legs. */
+/** Whether a host cohort has any supported release in a Node major. */
 export function supportsNodeMajor(config, major) {
   if (config.node === undefined) return true
-  const minimum = config.node.match(/^>=(\d+)\.\d+\.\d+$/)
-  if (!minimum) throw new Error(`Unsupported Node requirement ${config.node}`)
-  return major >= Number(minimum[1])
+  return major >= minimumNode(config)[0]
+}
+
+/** Whether an exact Node version satisfies the cohort's inclusive floor. */
+export function supportsNodeVersion(config, version) {
+  if (config.node === undefined) return true
+  const current = version.replace(/^v/, '').split('.').map(Number)
+  if (current.length !== 3 || current.some(part => !Number.isSafeInteger(part))) {
+    throw new Error(`Invalid Node version ${version}`)
+  }
+  const minimum = minimumNode(config)
+  for (let index = 0; index < 3; index++) {
+    if (current[index] !== minimum[index]) return current[index] > minimum[index]
+  }
+  return true
+}
+
+function minimumNode(config) {
+  const match = config.node.match(/^>=(\d+)\.(\d+)\.(\d+)$/)
+  if (!match) throw new Error(`Unsupported Node requirement ${config.node}`)
+  return match.slice(1).map(Number)
 }
 
 function main() {

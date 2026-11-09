@@ -2,7 +2,7 @@
 import { spawnSync } from 'node:child_process'
 import { mkdirSync, readFileSync, writeFileSync, appendFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { readCompatibility, supportsNodeMajor } from './ci-compatibility.mjs'
+import { readCompatibility, supportsNodeMajor, supportsNodeVersion } from './ci-compatibility.mjs'
 
 const [mode, major] = process.argv.slice(2)
 const directory = resolve('artifacts/ci')
@@ -34,6 +34,9 @@ if (mode === 'summary') {
   else process.stdout.write(text)
 } else if (mode === 'verify' && ['22', '24'].includes(major)) {
   if (process.versions.node.split('.')[0] !== major) throw new Error(`Expected Node ${major}, got ${process.version}`)
+  if (!supportsNodeVersion(entries[version], process.versions.node)) {
+    throw new Error(`DSH ${version} requires Node ${entries[version].node}, got ${process.version}`)
+  }
   mkdirSync(directory, { recursive: true })
   const report = { node: process.version, dsh: version, steps: [] }
   const save = () => writeFileSync(`${directory}/node-${major}.json`, `${JSON.stringify(report, null, 2)}\n`)

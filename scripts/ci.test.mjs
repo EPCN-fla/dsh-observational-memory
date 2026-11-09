@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import { parse } from 'yaml'
 import semver from 'semver'
-import { readCompatibility } from './ci-compatibility.mjs'
+import { readCompatibility, supportsNodeVersion } from './ci-compatibility.mjs'
 
 const script = name => fileURLToPath(new URL(name, import.meta.url))
 
@@ -55,6 +55,11 @@ test('the DSH 0.2.2 cohort emits its Node 24.9 floor and skips Node 22', () => f
   const selected = run(root, 'ci-compatibility.mjs', ['select', '0.2.2-rc.1'], { GITHUB_OUTPUT: output })
   assert.equal(selected.status, 0, selected.stderr)
   assert.match(readFileSync(output, 'utf8'), /node22=false/)
+  const cohort = manifest.dshCompatibility['0.2.2-rc.1']
+  assert.equal(supportsNodeVersion(cohort, '24.8.9'), false)
+  assert.equal(supportsNodeVersion(cohort, '24.9.0'), true)
+  assert.equal(supportsNodeVersion(cohort, '24.10.0'), true)
+  assert.equal(supportsNodeVersion(cohort, '25.0.0'), true)
   mkdirSync(join(root, 'artifacts/ci'), { recursive: true })
   writeFileSync(join(root, 'artifacts/ci/node-24.json'), JSON.stringify({
     node: 'v24.0.0', dsh: '0.2.1-rc.5', steps: [{ name: 'install', status: 'passed' }],
@@ -115,7 +120,9 @@ test('verification records failures, continues independent checks and summarizes
 test('workflow isolates PR validation but gates tag-only publishing on the full local check', () => {
   const workflow = parse(readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8'))
   assert.deepEqual(workflow.on, { pull_request: null, push: { tags: ['v*'] } })
-  assert.equal(workflow.jobs.publish.needs, undefined)
+  assert.equal(workflow.jobs.publish.needs, 'verify')
+  assert.equal(workflow.jobs.compatibility.if, undefined)
+  assert.equal(workflow.jobs.verify.if, undefined)
   assert.equal(workflow.jobs.publish.permissions['id-token'], 'write')
   assert.equal(workflow.jobs.publish.concurrency.group, 'npm-publish-${{ github.repository }}')
   assert.equal(workflow.jobs.publish.concurrency['cancel-in-progress'], false)
@@ -133,4 +140,5 @@ test('workflow isolates PR validation but gates tag-only publishing on the full 
   const publish = publishCommands.indexOf('npm publish --ignore-scripts')
   assert.ok(check >= 0, 'tag publishing must run the full local gate')
   assert.ok(publish > check, 'the full local gate must precede npm publish')
+  assert.match(publishCommands, /artifacts\/\$\(node/, 'publish must consume the verified tarball')
 })
