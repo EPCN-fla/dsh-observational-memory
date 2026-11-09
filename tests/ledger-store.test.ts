@@ -73,11 +73,21 @@ describe('LedgerStore', () => {
   it('serializes strict appends after queued normal writes without cache loss', async () => {
     const store = new LedgerStore(dir)
     const pending = store.append('s1', record('queued normal write', 1))
-    await vi.waitFor(() => expect(store.entries('s1')).toHaveLength(1))
-    await store.appendAllStrict('s1', [record('strict write', 2)])
-    await pending
+    const strict = store.appendAllStrict('s1', [record('strict write', 2)])
+    await Promise.all([pending, strict])
 
     expect(store.entries('s1')).toHaveLength(2)
+    expect(await new LedgerStore(dir).loadStrict('s1')).toHaveLength(2)
+  })
+
+  it('preserves normal writes queued behind a strict append in the cache', async () => {
+    const store = new LedgerStore(dir)
+    const strict = store.appendAllStrict('s1', [record('strict first', 1)])
+    const normal = store.append('s1', record('normal second', 2))
+    await Promise.all([strict, normal])
+
+    expect(store.entries('s1').map(entry => entry.kind === 'observations-recorded' ? entry.observations[0].content : ''))
+      .toEqual(['strict first', 'normal second'])
     expect(await new LedgerStore(dir).loadStrict('s1')).toHaveLength(2)
   })
 

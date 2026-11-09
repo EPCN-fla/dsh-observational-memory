@@ -73,7 +73,7 @@ export function registerConsolidationTrigger(ctx: Context, runtime: OmRuntime): 
   ctx.on('session/event', (session, event) => {
     if (event.type !== 'turn/end') return
     if (!isMemorySession(session)) return
-    launch(ctx, runtime, session)
+    launch(ctx, runtime, session, { allowUninherited: true })
   })
   // DSH ≥0.1.6 dispatches agent/created serially and rejects creation on a
   // throwing listener; this one only enqueues a caught async launch, so it
@@ -87,21 +87,32 @@ export function registerConsolidationTrigger(ctx: Context, runtime: OmRuntime): 
   })
 }
 
-function launch(ctx: Context, runtime: OmRuntime, session: Session): void {
-  void maybeLaunchConsolidation(ctx, runtime, session).catch((error: unknown) => {
+interface LaunchOptions {
+  /** A new turn/manual action may start fresh when no rollback RPC arrives. */
+  allowUninherited?: boolean
+}
+
+function launch(ctx: Context, runtime: OmRuntime, session: Session, options: LaunchOptions = {}): void {
+  void maybeLaunchConsolidation(ctx, runtime, session, options).catch((error: unknown) => {
     const message = error instanceof Error ? error.message : String(error)
     ctx.logger.warn(`[observational-memory] consolidation failed: ${message}`)
   })
 }
 
 /** Exported for tests; the triggers above are the production callers. */
-export async function maybeLaunchConsolidation(ctx: Context, runtime: OmRuntime, session: Session): Promise<void> {
+export async function maybeLaunchConsolidation(
+  ctx: Context,
+  runtime: OmRuntime,
+  session: Session,
+  options: LaunchOptions = {},
+): Promise<void> {
   // Pick up live (DSH ≥0.1.7 volatile) profile edits; a no-op when unchanged.
   runtime.refreshConfig()
   // Inheriting a fork parent's ledger is not a proactive trigger: passive
   // mode keeps it, so a rolled-back branch holds on to the memory it shares
   // with its source even with every background worker disabled.
-  if (!await runtime.ensureInherited(ctx, session)) return
+  const inherited = await runtime.ensureInherited(ctx, session)
+  if (!inherited && options.allowUninherited !== true) return
   const config = runtime.config
   const sessionId: string = session.id
   if (config.passive) {
@@ -113,7 +124,7 @@ export async function maybeLaunchConsolidation(ctx: Context, runtime: OmRuntime,
   // trailing due-check with the latest session after settling.
   const owner = runtime.claimConsolidation(sessionId)
   if (owner === undefined) {
-    runtime.consolidationPending.set(sessionId, session)
+    runtime.consolidationPending.set(sessionId, { session, allowUninherited: options.allowUninherited === true })
     return
   }
   try {
@@ -129,14 +140,14 @@ export async function maybeLaunchConsolidation(ctx: Context, runtime: OmRuntime,
     runtime.clearStageErrors(sessionId)
     const succeeded = await runConsolidationPipeline(ctx, runtime, session)
     if (succeeded) runtime.clearConsolidationRetry(sessionId)
-    else runtime.scheduleConsolidationRetry(session, () => launch(ctx, runtime, session))
+    else runtime.scheduleConsolidationRetry(session, () => launch(ctx, runtime, session, options))
   } finally {
     const released = runtime.releaseConsolidation(sessionId, owner)
     releaseDisposedSession(ctx, runtime, session)
     const pending = released ? runtime.consolidationPending.get(sessionId) : undefined
     if (pending !== undefined) {
       runtime.consolidationPending.delete(sessionId)
-      launch(ctx, runtime, pending)
+      launch(ctx, runtime, pending.session, { allowUninherited: pending.allowUninherited })
     }
   }
 }
@@ -183,7 +194,9 @@ export async function runConsolidationNow(
   const owner = runtime.claimConsolidation(sessionId)
   if (owner === undefined) return false
   try {
-    if (!await runtime.ensureInherited(ctx, session)) return false
+    // A manual run is the explicit recovery path when an ordinary fork has no
+    // provable source (or its rollback inheritance RPC never completed).
+    await runtime.ensureInherited(ctx, session)
     runtime.clearConsolidationRetry(sessionId)
     runtime.clearStageErrors(sessionId)
     return runConsolidationPipeline(ctx, runtime, session, { force: true, signal })
@@ -193,7 +206,7 @@ export async function runConsolidationNow(
     const pending = released ? runtime.consolidationPending.get(sessionId) : undefined
     if (pending !== undefined) {
       runtime.consolidationPending.delete(sessionId)
-      launch(ctx, runtime, pending)
+      launch(ctx, runtime, pending.session, { allowUninherited: pending.allowUninherited })
     }
   }
 }

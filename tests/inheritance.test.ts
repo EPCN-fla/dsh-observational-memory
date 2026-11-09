@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { Context } from '@deepseek-ai/cordis'
 import { PlainConfig } from '../src/config.ts'
-import { maybeLaunchConsolidation } from '../src/hooks/consolidation.ts'
+import { maybeLaunchConsolidation, runConsolidationNow } from '../src/hooks/consolidation.ts'
 import { OmApiService } from '../src/api.ts'
 import {
   buildObservationsRecorded,
@@ -58,8 +58,11 @@ function fakeCtx(attached: Session[] = []): Context {
 }
 
 /** The same stub with its scripted-llm call counter exposed. */
-function fakeCtxWithLlm(attached: Session[] = []): { ctx: Context; callCount: () => number } {
-  const { ctx, callCount } = fakeLlmCtx([])
+function fakeCtxWithLlm(
+  attached: Session[] = [],
+  turns: Parameters<typeof fakeLlmCtx>[0] = [],
+): { ctx: Context; callCount: () => number } {
+  const { ctx, callCount } = fakeLlmCtx(turns)
   ctx.sessions = { get: (id: string) => attached.find((session) => session.id === id) }
   ctx.agents = { get: () => undefined }
   ctx.logger = { info: () => {}, warn: () => {} }
@@ -194,11 +197,36 @@ describe('fork memory inheritance', () => {
     if (!record) throw new Error('fixture record must build')
     const child = forkSession('child', undefined, 1, { isSeeded: true })
     const writing = runtime.store.append('parent', record)
-    await vi.waitFor(() => expect(runtime.store.entries('parent')).toHaveLength(1))
+    const inheriting = runtime.inheritFork(fakeCtx(), child, 'parent' as SessionId, 0)
+    await Promise.all([writing, inheriting])
 
-    expect(await runtime.inheritFork(fakeCtx(), child, 'parent' as SessionId, 0)).toBe(true)
-    await writing
     expect(await runtime.store.load('child')).toEqual([record])
+  })
+
+  it('revalidates explicit inheritance after a non-strict legacy pass', async () => {
+    const runtime = makeRuntime()
+    const record = buildObservationsRecorded([makeObservation({ content: 'Strict copy after legacy pass.' })], 20)
+    if (!record) throw new Error('fixture record must build')
+    await runtime.store.append('parent', record)
+    const child = forkSession('child', 'parent', 21)
+
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    let legacyWriting = false
+    vi.spyOn(runtime.store, 'appendAll').mockImplementation(async () => {
+      legacyWriting = true
+      await gate
+    })
+    const strict = vi.spyOn(runtime.store, 'appendAllStrict')
+
+    const legacy = runtime.ensureInherited(fakeCtx(), child)
+    await vi.waitFor(() => expect(legacyWriting).toBe(true))
+    const explicit = runtime.inheritFork(fakeCtx(), child, 'parent' as SessionId, 20)
+    release()
+    await Promise.all([legacy, explicit])
+
+    expect(strict).toHaveBeenCalledTimes(1)
+    expect(await new OmRuntime(PlainConfig({ storageDir: dir }), { onError: () => {} }).store.load('child')).toEqual([record])
   })
 
   it('does not persist completion when a strict inheritance read fails', async () => {
@@ -235,6 +263,38 @@ describe('fork memory inheritance', () => {
     const restarted = makeRuntime()
     expect(await restarted.ensureInherited(fakeCtx(), child)).toBe(true)
     expect(await restarted.inheritFork(fakeCtx(), child, 'parent' as SessionId, 20)).toBe(false)
+  })
+
+  it('starts fresh on a new turn when no explicit inheritance arrives', async () => {
+    const runtime = makeRuntime({ observeAfterTokens: 1, reflectAfterTokens: 100_000 })
+    const events = [userEvent('branch continues without inherited memory')]
+    const child = {
+      ...forkSession('child', undefined, 1, { isSeeded: true }),
+      snapshotEvents: () => events,
+    } as unknown as Session
+    const { ctx, callCount } = fakeCtxWithLlm([], [{ text: 'nothing durable' }])
+    ctx.llm.resolveModelInfo = async () => ({ provider: 'p', id: 'm', name: 'Fake', context: { contextWindow: 128_000 } })
+
+    await maybeLaunchConsolidation(ctx, runtime, child)
+    expect(callCount()).toBe(0)
+    await maybeLaunchConsolidation(ctx, runtime, child, { allowUninherited: true })
+    expect(callCount()).toBe(1)
+    expect(runtime.store.entries('child')).toHaveLength(1)
+  })
+
+  it('allows a manual run to recover a parentless fork without inheritance', async () => {
+    const runtime = makeRuntime()
+    const events = [userEvent('manual branch recovery')]
+    const child = {
+      ...forkSession('child', undefined, 1, { isSeeded: true }),
+      snapshotEvents: () => events,
+    } as unknown as Session
+    const { ctx, callCount } = fakeCtxWithLlm([], [{ text: 'nothing durable' }])
+    ctx.llm.resolveModelInfo = async () => ({ provider: 'p', id: 'm', name: 'Fake', context: { contextWindow: 128_000 } })
+
+    expect(await runConsolidationNow(ctx, runtime, child)).toBe(true)
+    expect(callCount()).toBe(1)
+    expect(runtime.store.entries('child')).toHaveLength(1)
   })
 
   it('resumes the deferred automatic pipeline after explicit inheritance', async () => {

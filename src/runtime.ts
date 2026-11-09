@@ -48,7 +48,7 @@ export class OmRuntime {
   readonly consolidationInFlight = new Set<string>()
   private readonly consolidationOwners = new Map<string, symbol>()
   /** Latest automatic trigger coalesced while a session pipeline is active. */
-  readonly consolidationPending = new Map<string, Session>()
+  readonly consolidationPending = new Map<string, { session: Session; allowUninherited: boolean }>()
   /** Claim one session pipeline; only the returned owner may release it. */
   claimConsolidation(sessionId: string): symbol | undefined {
     if (this.consolidationOwners.has(sessionId)) return undefined
@@ -114,7 +114,7 @@ export class OmRuntime {
   /** Sessions with a proactive compaction currently in flight. */
   readonly compactInFlight = new Set<string>()
   /** Fork-ledger inheritance runs in flight, deduped per session. */
-  private readonly inheritanceInFlight = new Map<string, Promise<void>>()
+  private readonly inheritanceInFlight = new Map<string, { task: Promise<void>; strict: boolean }>()
   /** Parentless DSH ≥0.2.2 forks whose explicit rollback inheritance completed. */
   private readonly explicitForkInheritance = new Set<string>()
 
@@ -318,10 +318,11 @@ export class OmRuntime {
     const parentId = session.header.parentSession
     if (parentId === undefined) {
       // DSH ≥0.2.2 deliberately persists no source id on an ordinary fork.
-      // Only this plugin's rollback RPC can prove that relationship. Until it
-      // completes, defer the automatic pipeline so a branch-local write cannot
-      // close inheritance prematurely. An already copied ledger survives Host
-      // restarts and needs no runtime marker.
+      // Only this plugin's rollback RPC can prove that relationship. Defer the
+      // creation-time trigger so that RPC can win the race; a later new turn or
+      // explicit manual run may deliberately start fresh if no RPC arrives.
+      // A nonempty copied ledger survives Host restarts without a marker;
+      // zero-record completion uses the persistent marker below.
       if (this.explicitForkInheritance.has(sessionId)) return true
       if ((await this._store.load(sessionId)).length > 0) return true
       // A valid fork may have zero records to copy. Persist completion so an
@@ -371,14 +372,24 @@ export class OmRuntime {
 
   /** Share one inheritance pass between legacy discovery and explicit RPC. */
   private async runInheritance(ctx: Context, sessionId: string, parentId: SessionId, boundary: number, strict = false): Promise<void> {
-    const pending = this.inheritanceInFlight.get(sessionId)
-    if (pending) return pending
-    const task = this.inheritLineage(ctx, sessionId, parentId, boundary, strict)
-    this.inheritanceInFlight.set(sessionId, task)
-    try {
-      await task
-    } finally {
-      this.inheritanceInFlight.delete(sessionId)
+    while (true) {
+      const pending = this.inheritanceInFlight.get(sessionId)
+      if (pending && (pending.strict || !strict)) return pending.task
+      if (pending) {
+        // A best-effort legacy pass cannot prove durable completion. Wait for
+        // it, then rerun through strict reads/writes before writing a marker.
+        await pending.task.catch(() => {})
+        continue
+      }
+      const task = this.inheritLineage(ctx, sessionId, parentId, boundary, strict)
+      const running = { task, strict }
+      this.inheritanceInFlight.set(sessionId, running)
+      try {
+        await task
+      } finally {
+        if (this.inheritanceInFlight.get(sessionId) === running) this.inheritanceInFlight.delete(sessionId)
+      }
+      return
     }
   }
 
