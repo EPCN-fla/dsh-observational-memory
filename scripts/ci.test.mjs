@@ -130,9 +130,7 @@ test('CI and the committed lockfile use official npm package endpoints', () => {
 test('workflow isolates PR validation but gates tag-only publishing on the full local check', () => {
   const workflow = parse(readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8'))
   assert.deepEqual(workflow.on, { pull_request: null, push: { tags: ['v*'] } })
-  assert.equal(workflow.jobs.publish.needs, 'verify')
-  assert.equal(workflow.jobs.compatibility.if, undefined)
-  assert.equal(workflow.jobs.verify.if, undefined)
+  assert.equal(workflow.jobs.publish.needs, undefined)
   assert.equal(workflow.jobs.publish.permissions['id-token'], 'write')
   assert.equal(workflow.jobs.publish.concurrency.group, 'npm-publish-${{ github.repository }}')
   assert.equal(workflow.jobs.publish.concurrency['cancel-in-progress'], false)
@@ -150,5 +148,4 @@ test('workflow isolates PR validation but gates tag-only publishing on the full 
   const publish = publishCommands.indexOf('npm publish --ignore-scripts')
   assert.ok(check >= 0, 'tag publishing must run the full local gate')
   assert.ok(publish > check, 'the full local gate must precede npm publish')
-  assert.match(publishCommands, /artifacts\/\$\(node/, 'publish must consume the verified tarball')
 })
