@@ -72,7 +72,7 @@ flowchart TD
 | 0.1.3 | 0.1.5-rc.2 | 0.1.5-rc.2 |
 | 0.1.2 | 0.1.5-rc.2 | 0.1.5-rc.2 |
 
-插件在 0.1.7 及以上使用 Profile 持有的实时配置，在 0.1.5 上回退到经典 settings.yaml 设置节，旧设置文档在 0.1.7 首次启动时自动导入。DSH 0.2.2-rc.1 要求 Node.js `>=24.9.0`；旧 DSH cohort 仍保留原 Node 支持范围。
+peer 范围会允许同一 prerelease 系列的后续 RC，但上表只承诺已实际验证的版本；未来 RC 仍需回归验证。插件在 0.1.7 及以上使用 Profile 持有的实时配置，在 0.1.5 上回退到经典 settings.yaml 设置节，旧设置文档在 0.1.7 首次启动时自动导入。DSH 0.2.2-rc.1 要求 Node.js `>=24.9.0`；旧 DSH cohort 仍保留原 Node 支持范围。
 
 通过 DSH CLI 把插件加入指定的 Profile（这里以 `web` 为例，按需替换）。本包自带 `cordis.patch.yml`，组合器会自动挂载 host 半端，并向 Web 客户端提供 `/plugins/dsh-observational-memory/client.js`——安装后无需额外的组合配置。
 
@@ -203,7 +203,7 @@ observational-memory:
 - **Preset 差异**：在 Web 组合中压缩引擎位于 agent preset 的隔离 realm 内；`minimal` 等不含压缩引擎的 preset 下，主动压缩触发器自动静默（记忆账本与压缩渲染不受影响）。
 - **ratio 模式的窗口依赖**：ratio 模式下会话模型的上下文窗口不可解析时，主动压缩触发器保持关闭，不回退到固定阈值。
 - **Headless 运行**：记忆选项卡的数据走 Typert Remote 端点；无 API Gateway 的 headless 运行中选项卡不可用，其余功能（账本、压缩渲染、主动压缩、recall 工具）不受影响。
-- **回退按钮的实现**：通过替换 `conversation.chat.node` 槽位的 `user`/`steering` 渲染器实现（priority -1 遮蔽内置渲染器）。若其他插件也遮蔽同一键，注册冲突只会影响对应渲染器，不影响本插件的其他功能。DSH 0.2.2 的 `conversation.chat.user.before` 声明仍归内置项所有，替换项不能重复声明或取得其 `renderSlotChain`，因此其它插件的消息来源装饰不会显示在本插件渲染的行上。DSH 0.2.2 其它入口创建的普通 fork 没有持久来源字段，只有本插件回退路径能证明并继承来源账本。
+- **回退按钮的实现**：通过替换 `conversation.chat.node` 槽位的 `user`/`steering` 渲染器实现（priority -1 遮蔽内置渲染器）。若其他插件也遮蔽同一键，注册冲突只会影响对应渲染器，不影响本插件的其他功能。DSH 0.2.2 的 `conversation.chat.user.before` 声明仍归内置项所有，替换项不能重复声明或取得其 `renderSlotChain`，因此其它插件的消息来源装饰不会显示在本插件渲染的行上。DSH 0.2.2 其它入口创建的普通 fork 没有持久来源字段，只有本插件回退路径能证明并继承来源账本。若继承 RPC 未到达，创建时的自动触发会暂缓；首个新轮次或手动「立即运行」会从空账本恢复后续记忆，不会永久停用该分支。
 - **Token 估算**：所有 token 计数为估算值（约 4 字符/token），非 ASCII 内容可能偏差。
 - **账本清理**：账本文件存放于插件目录（默认 `$DSH_HOME/observational-memory`），卸载插件不会自动清理，可手动删除。
 
