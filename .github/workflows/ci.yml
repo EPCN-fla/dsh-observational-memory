@@ -10,6 +10,11 @@ on:
 permissions:
   contents: read
 
+# Do not let a third-party mirror's availability invalidate every host cohort.
+# This also covers lock regeneration and tarball consumers spawned by scripts.
+env:
+  NPM_CONFIG_REGISTRY: https://registry.npmjs.org
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
