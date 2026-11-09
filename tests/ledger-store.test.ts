@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { LedgerStore, ledgerFileName } from '../src/ledger/store.ts'
 import type { LedgerEntry } from '../src/ledger/types.ts'
 import { makeObservation } from './fixtures.ts'
@@ -68,6 +68,38 @@ describe('LedgerStore', () => {
     ])
     await store.flush()
     expect(await new LedgerStore(dir).load('s1')).toHaveLength(3)
+  })
+
+  it('serializes strict appends after queued normal writes without cache loss', async () => {
+    const store = new LedgerStore(dir)
+    const pending = store.append('s1', record('queued normal write', 1))
+    const strict = store.appendAllStrict('s1', [record('strict write', 2)])
+    await Promise.all([pending, strict])
+
+    expect(store.entries('s1')).toHaveLength(2)
+    expect(await new LedgerStore(dir).loadStrict('s1')).toHaveLength(2)
+  })
+
+  it('preserves normal writes queued behind a strict append in the cache', async () => {
+    const store = new LedgerStore(dir)
+    const strict = store.appendAllStrict('s1', [record('strict first', 1)])
+    const normal = store.append('s1', record('normal second', 2))
+    await Promise.all([strict, normal])
+
+    expect(store.entries('s1').map(entry => entry.kind === 'observations-recorded' ? entry.observations[0].content : ''))
+      .toEqual(['strict first', 'normal second'])
+    expect(await new LedgerStore(dir).loadStrict('s1')).toHaveLength(2)
+  })
+
+  it('keeps strict appends valid after a complete unterminated record', async () => {
+    const file = join(dir, ledgerFileName('s1'))
+    await writeFile(file, JSON.stringify(record('complete but unterminated', 1)), 'utf8')
+    const store = new LedgerStore(dir)
+    expect(await store.loadStrict('s1')).toHaveLength(1)
+    await store.appendAllStrict('s1', [record('next strict record', 2)])
+
+    expect(await readFile(file, 'utf8')).toContain('}\n{"kind":"observations-recorded"')
+    expect(await new LedgerStore(dir).loadStrict('s1')).toHaveLength(2)
   })
 
   it('skips invalid lines on load and reports them', async () => {

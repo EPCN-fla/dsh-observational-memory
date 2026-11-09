@@ -115,6 +115,36 @@ describe('forkRollbackSession', () => {
     expect(failures).toEqual([])
   })
 
+  it('inherits the exact fork cut before retaining, restoring and opening the child', async () => {
+    const order: string[] = []
+    const sessions: RollbackSessions = {
+      fork: async () => 'child',
+      retainAgentScope: () => { order.push('retain'); return { release: () => {} } },
+      scope: () => ({}),
+      open: () => { order.push('open') },
+    }
+    await forkRollbackSession(sessions, 'source', 3, 'text', () => { order.push('draft') }, () => {}, undefined, async childId => {
+      order.push(`inherit:${childId}`)
+    })
+    expect(order).toEqual(['inherit:child', 'retain', 'draft', 'open'])
+  })
+
+  it('reports an inheritance failure without opening an uninitialized child', async () => {
+    const failures: string[] = []
+    let retained = false
+    const sessions: RollbackSessions = {
+      fork: async () => 'child',
+      retainAgentScope: () => { retained = true; return { release: () => {} } },
+      scope: () => ({}),
+      open: () => {},
+    }
+    await forkRollbackSession(sessions, 'source', 3, 'text', () => {}, failure => { failures.push(failure) }, undefined, async () => {
+      throw new Error('prefix mismatch')
+    })
+    expect(failures).toEqual(['inherit'])
+    expect(retained).toBe(false)
+  })
+
   it('reports an unavailable child scope instead of silently dropping the draft', async () => {
     const failures: string[] = []
     let released = false

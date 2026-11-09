@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import { parse } from 'yaml'
 import semver from 'semver'
-import { readCompatibility } from './ci-compatibility.mjs'
+import { readCompatibility, supportsNodeVersion } from './ci-compatibility.mjs'
 
 const script = name => fileURLToPath(new URL(name, import.meta.url))
 
@@ -50,12 +50,38 @@ test('compatibility reader rejects empty, ranged and malformed metadata', () => 
   }
 }))
 
+test('the DSH 0.2.2 cohort emits its Node 24.9 floor and skips Node 22', () => fixture(root => {
+  const output = join(root, 'github-output.txt')
+  const selected = run(root, 'ci-compatibility.mjs', ['select', '0.2.2-rc.1'], { GITHUB_OUTPUT: output })
+  assert.equal(selected.status, 0, selected.stderr)
+  assert.match(readFileSync(output, 'utf8'), /node22=false/)
+  const cohort = manifest.dshCompatibility['0.2.2-rc.1']
+  assert.equal(supportsNodeVersion(cohort, '24.8.9'), false)
+  assert.equal(supportsNodeVersion(cohort, '24.9.0'), true)
+  assert.equal(supportsNodeVersion(cohort, '24.10.0'), true)
+  assert.equal(supportsNodeVersion(cohort, '25.0.0'), true)
+  mkdirSync(join(root, 'artifacts/ci'), { recursive: true })
+  writeFileSync(join(root, 'artifacts/ci/node-24.json'), JSON.stringify({
+    node: 'v24.0.0', dsh: '0.2.1-rc.5', steps: [{ name: 'install', status: 'passed' }],
+  }))
+  const summary = run(root, 'ci-verify.mjs', ['summary'], { DSH_TEST_VERSION: '0.2.2-rc.1' })
+  assert.equal(summary.status, 0, summary.stderr)
+  assert.match(summary.stdout, /\| 22 \| not required \| unsupported \|/)
+  assert.doesNotMatch(summary.stdout, /passed/)
+
+  const invalid = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
+  invalid.dshCompatibility['0.2.2-rc.1'].node = '22'
+  writeFileSync(join(root, 'package.json'), JSON.stringify(invalid))
+  assert.throws(() => readCompatibility(join(root, 'package.json')))
+}))
+
 test('every published host in the peer compatibility window has an executable matrix entry', () => {
   assert.deepEqual(Object.keys(manifest.dshCompatibility), [
     '0.1.5-rc.2', '0.1.5-rc.3',
     '0.1.7-rc.1', '0.1.7-rc.2',
     '0.2.0-rc.1', '0.2.0-rc.2',
     '0.2.1-rc.1', '0.2.1-rc.2', '0.2.1-rc.3', '0.2.1-rc.4', '0.2.1-rc.5',
+    '0.2.2-rc.1',
   ])
   // 0.1.5-rc.4 remains in the peer declaration but was never published to npm.
   assert.equal(manifest.dshCompatibility['0.1.5-rc.4'], undefined)
@@ -91,16 +117,29 @@ test('verification records failures, continues independent checks and summarizes
   assert.ok(report.steps.slice(1).every(s => s.status === 'skipped'))
 }))
 
+test('CI and the committed lockfile use official npm package endpoints', () => {
+  const workflow = parse(readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8'))
+  assert.equal(workflow.env.NPM_CONFIG_REGISTRY, 'https://registry.npmjs.org')
+  const lock = JSON.parse(readFileSync(new URL('../package-lock.json', import.meta.url), 'utf8'))
+  for (const [path, entry] of Object.entries(lock.packages)) {
+    if (typeof entry.resolved !== 'string' || !entry.resolved.startsWith('https://registry.')) continue
+    assert.equal(new URL(entry.resolved).hostname, 'registry.npmjs.org', `${path} uses a third-party registry mirror`)
+  }
+})
+
 test('workflow isolates PR validation but gates tag-only publishing on the full local check', () => {
   const workflow = parse(readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8'))
   assert.deepEqual(workflow.on, { pull_request: null, push: { tags: ['v*'] } })
-  assert.equal(workflow.jobs.publish.needs, undefined)
+  assert.equal(workflow.jobs.publish.needs, 'verify')
+  assert.equal(workflow.jobs.compatibility.if, undefined)
+  assert.equal(workflow.jobs.verify.if, undefined)
   assert.equal(workflow.jobs.publish.permissions['id-token'], 'write')
   assert.equal(workflow.jobs.publish.concurrency.group, 'npm-publish-${{ github.repository }}')
   assert.equal(workflow.jobs.publish.concurrency['cancel-in-progress'], false)
   const steps = workflow.jobs.verify.steps
   assert.match(steps.find(s => s.id === 'verify24').if, /!cancelled\(\)/)
   assert.doesNotMatch(steps.find(s => s.id === 'verify24').if, /verify22|smoke/)
+  assert.match(steps.find(s => s.id === 'verify22').if, /node22/)
   assert.equal(steps.find(s => s.name === 'Test summary').if, 'always()')
   assert.match(steps.find(s => s.id === 'cohort').run, /mktemp/)
   for (const job of Object.values(workflow.jobs)) {
@@ -111,4 +150,5 @@ test('workflow isolates PR validation but gates tag-only publishing on the full 
   const publish = publishCommands.indexOf('npm publish --ignore-scripts')
   assert.ok(check >= 0, 'tag publishing must run the full local gate')
   assert.ok(publish > check, 'the full local gate must precede npm publish')
+  assert.match(publishCommands, /artifacts\/\$\(node/, 'publish must consume the verified tarball')
 })

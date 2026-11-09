@@ -656,6 +656,59 @@ describe('consolidation scheduling', () => {
     }
   })
 
+  it('honors custom retry delays, caps and the configured attempt limit', async () => {
+    vi.useFakeTimers()
+    const runtime = new OmRuntime(PlainConfig({
+      storageDir: dir,
+      consolidationRetryMaxAttempts: 3,
+      consolidationRetryBaseDelayMs: 100,
+      consolidationRetryMaxDelayMs: 250,
+    }), { onError: () => {} })
+    try {
+      const session = fakeSession([])
+      let calls = 0
+      const retry = (): void => {
+        calls++
+        runtime.scheduleConsolidationRetry(session, retry)
+      }
+      runtime.scheduleConsolidationRetry(session, retry)
+      await vi.advanceTimersByTimeAsync(99)
+      expect(calls).toBe(0)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(calls).toBe(1)
+      await vi.advanceTimersByTimeAsync(199)
+      expect(calls).toBe(1)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(calls).toBe(2)
+      await vi.advanceTimersByTimeAsync(249)
+      expect(calls).toBe(2)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(calls).toBe(3)
+      await vi.advanceTimersByTimeAsync(30_000)
+      expect(calls).toBe(3)
+    } finally {
+      runtime.clearConsolidationRetries()
+      vi.useRealTimers()
+    }
+  })
+
+  it('disables automatic consolidation retries when the configured limit is zero', async () => {
+    vi.useFakeTimers()
+    const runtime = new OmRuntime(PlainConfig({
+      storageDir: dir,
+      consolidationRetryMaxAttempts: 0,
+    }), { onError: () => {} })
+    try {
+      let calls = 0
+      runtime.scheduleConsolidationRetry(fakeSession([]), () => { calls++ })
+      await vi.advanceTimersByTimeAsync(30_000)
+      expect(calls).toBe(0)
+    } finally {
+      runtime.clearConsolidationRetries()
+      vi.useRealTimers()
+    }
+  })
+
   it('cancels a scheduled retry when the session is disposed', async () => {
     vi.useFakeTimers()
     const runtime = new OmRuntime(PlainConfig({ observeAfterTokens: 10, storageDir: dir }), { onError: () => {} })

@@ -4,7 +4,7 @@
  * The host enforces each plugin's `peerDependencies` at install and at
  * startup with `semver.satisfies(runtimeVersion, range, { includePrerelease:
  * true })` (packages/boot/app-boot/src/plugin-compatibility.ts; that peers
- * predicate is unchanged across 0.1.7-rc.1 … 0.2.1-rc.5 — the 0.2.1 rewrite
+ * predicate is unchanged across 0.1.7-rc.1 … 0.2.2-rc.1 — the 0.2.1 rewrite
  * only adds an opt-in `engines.dsh` alternative this plugin does not use).
  * Two failure modes have bitten in practice and must never regress:
  *
@@ -50,11 +50,15 @@ const SUPPORTED_HOSTS = [
   '0.2.1-rc.3',
   '0.2.1-rc.4',
   '0.2.1-rc.5',
+  // 0.2.2 release candidates (Node >=24.9; pending model selection and
+  // parentless ordinary forks adapted in runtime/client integration).
+  '0.2.2-rc.1',
   // The windows are `>=`-floored inside each prerelease line by design:
   // future rcs of an already-audited line install without a plugin release.
   '0.1.7-rc.99',
   '0.2.0-rc.99',
   '0.2.1-rc.99',
+  '0.2.2-rc.99',
 ] as const
 
 /**
@@ -72,6 +76,7 @@ const REFUSED_HOSTS = [
   '0.2.0',
   '0.2.1-alpha.1',
   '0.2.1',
+  '0.2.2',
   '0.3.0',
 ] as const
 

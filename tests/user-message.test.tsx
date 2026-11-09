@@ -164,6 +164,17 @@ describe('OmUserMessageNodeView', () => {
     expect(html).toContain('Rollback')
   })
 
+  it('marks the first steering row in a batch on DSH 0.2.2', () => {
+    const base = node()
+    const steering = {
+      ...base,
+      kind: 'steering',
+      data: { ...base.data, batchStart: true },
+    } as never
+    expect(render({ n: steering })).toContain('data-chat-steering-batch="start"')
+    expect(render({})).not.toContain('data-chat-steering-batch')
+  })
+
   it('renders plain text when the host serves neither projection nor render factories', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     vi.resetModules()

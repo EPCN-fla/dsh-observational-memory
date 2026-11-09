@@ -33,6 +33,8 @@ export class LedgerStore {
   private readonly tails = new Map<string, Promise<void>>()
   /** Files whose last record is not newline-terminated (or whose last append may be partial). */
   private readonly unterminated = new Set<string>()
+  /** Best-effort writes whose failure a later strict inheritance must not hide. */
+  private readonly writeFailures = new Map<string, unknown>()
   private ready = false
 
   constructor(
@@ -98,6 +100,11 @@ export class LedgerStore {
           this.options.onError?.(`session ${sessionId}: skipping unparseable ledger line`)
         }
       }
+      // A queued append may have published a newer snapshot while this read
+      // was in flight. Keep and return that cache rather than overwriting it
+      // with this older disk view (notably during strict fork recovery).
+      const current = this.cache.get(sessionId)
+      if (current !== undefined) return current
       this.cache.set(sessionId, entries)
       return entries
     })()
@@ -110,36 +117,96 @@ export class LedgerStore {
     }
   }
 
+  /** Wait for all earlier writes, then read a damage-intolerant snapshot. */
+  async loadStrict(sessionId: string): Promise<LedgerEntry[]> {
+    const tail = this.tails.get(sessionId) ?? Promise.resolve()
+    const next = tail.then(async () => {
+      const failure = this.writeFailures.get(sessionId)
+      if (failure !== undefined) throw failure
+      return (await this.readStrictNow(sessionId)).entries
+    })
+    this.tails.set(sessionId, next.then(() => {}, () => {}))
+    return next
+  }
+
+  /**
+   * Queue one strict inheritance append after all earlier writes. The disk
+   * snapshot and the append share one queue slot, so a stale `existing` value
+   * cannot overwrite a concurrent cache update. Persistence precedes cache
+   * publication; failures reject and never count as completed inheritance.
+   */
+  async appendAllStrict(sessionId: string, batch: readonly LedgerEntry[]): Promise<void> {
+    if (batch.length === 0) return
+    const tail = this.tails.get(sessionId) ?? Promise.resolve()
+    const next = tail.then(async () => {
+      const failure = this.writeFailures.get(sessionId)
+      if (failure !== undefined) throw failure
+      const { entries, unterminated } = await this.readStrictNow(sessionId)
+      await this.ensureRoot()
+      const line = `${unterminated ? '\n' : ''}${batch.map((entry) => JSON.stringify(entry)).join('\n')}\n`
+      try {
+        await appendFile(this.path(sessionId), line, 'utf8')
+      } catch (error) {
+        // A retry must start a fresh JSON line after a possible partial append.
+        this.unterminated.add(sessionId)
+        throw error
+      }
+      // All normal and strict cache staging occurs in this same per-session
+      // queue, so no later writer can have staged an entry yet.
+      this.cache.set(sessionId, [...entries, ...batch])
+      this.unterminated.delete(sessionId)
+    })
+    this.tails.set(sessionId, next.catch(() => {}))
+    return next
+  }
+
+  /** Read one exact on-disk snapshot inside the session's strict queue slot. */
+  private async readStrictNow(sessionId: string): Promise<{ entries: LedgerEntry[]; unterminated: boolean }> {
+    let text: string
+    try {
+      text = await readFile(this.path(sessionId), 'utf8')
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { entries: [], unterminated: false }
+      throw error
+    }
+    const entries: LedgerEntry[] = []
+    for (const line of text.split('\n')) {
+      const trimmed = line.trim()
+      if (!trimmed) continue
+      const parsed: unknown = JSON.parse(trimmed)
+      if (!isLedgerEntry(parsed)) throw new Error(`session ${sessionId}: invalid ledger record`)
+      entries.push(parsed)
+    }
+    return { entries, unterminated: text.length > 0 && !text.endsWith('\n') }
+  }
+
   /** In-memory snapshot; empty until `load` has resolved for the session. */
   entries(sessionId: string): readonly LedgerEntry[] {
     return this.cache.get(sessionId) ?? []
   }
 
   /**
-   * Append one record, updating the cache first and persisting on the
-   * session's serialized write chain. Persistence failures are reported and
-   * swallowed: memory work must never break the session pipeline, and the
-   * in-memory copy keeps the current process consistent.
+   * Append one record inside the session's serialized write chain. Cache
+   * staging shares that queue with strict writes, preventing cross-mode cache
+   * loss or duplication. Persistence failures are reported and swallowed:
+   * memory work must never break the session pipeline, and the in-memory copy
+   * keeps the current process consistent.
    */
   async append(sessionId: string, entry: LedgerEntry): Promise<void> {
     return this.appendAll(sessionId, [entry])
   }
 
-  /** Append a batch with one cache update and one serialized write. */
+  /** Append a batch with one queued cache update and one serialized write. */
   async appendAll(sessionId: string, batch: readonly LedgerEntry[]): Promise<void> {
     if (batch.length === 0) return
-    const entries = await this.load(sessionId)
-    // A first-ever write follows an uncached ENOENT load: install the shared
-    // array before pushing so later loads see the in-memory copy.
-    if (!this.cache.has(sessionId)) this.cache.set(sessionId, entries)
-    entries.push(...batch)
-    // A crash/partial append may leave an unterminated JSON fragment. Start
-    // the next valid record on a fresh line; otherwise the fragment and new
-    // JSON concatenate into another unparseable line and the new record is
-    // lost on the next reload. Preserve the damaged tail for diagnostics.
-    const line = `${this.unterminated.has(sessionId) ? '\n' : ''}${batch.map((entry) => JSON.stringify(entry)).join('\n')}\n`
     const tail = this.tails.get(sessionId) ?? Promise.resolve()
     const next = tail.then(async () => {
+      const entries = await this.load(sessionId)
+      // A crash/partial append may leave an unterminated JSON fragment. Start
+      // the next valid record on a fresh line; otherwise the fragment and new
+      // JSON concatenate into another unparseable line and the new record is
+      // lost on the next reload. Preserve the damaged tail for diagnostics.
+      const line = `${this.unterminated.has(sessionId) ? '\n' : ''}${batch.map((entry) => JSON.stringify(entry)).join('\n')}\n`
       try {
         await this.ensureRoot()
         await appendFile(this.path(sessionId), line, 'utf8')
@@ -149,8 +216,13 @@ export class LedgerStore {
         // next attempt is harmless when nothing landed and prevents sticking
         // new JSON onto a partial record when something did.
         this.unterminated.add(sessionId)
+        this.writeFailures.set(sessionId, error)
         this.options.onError?.(`failed to persist ledger for session ${sessionId}: ${String(error)}`)
       }
+      // Preserve the best-effort in-memory record even on a persistence
+      // failure, but publish only after this queue slot has settled.
+      if (!this.cache.has(sessionId)) this.cache.set(sessionId, entries)
+      entries.push(...batch)
     })
     this.tails.set(sessionId, next)
     return next

@@ -91,6 +91,14 @@ export interface Config {
   observationsPoolTargetTokens?: number
   /** Shared turn cap for background memory-worker loops. */
   agentMaxTurns?: number
+  /** Hard deadline for one complete worker run, including every tool round. */
+  workerTimeoutMs?: number
+  /** Maximum automatic retries after a failed consolidation pass; 0 disables retries. */
+  consolidationRetryMaxAttempts?: number
+  /** Initial consolidation retry delay; later delays double from this value. */
+  consolidationRetryBaseDelayMs?: number
+  /** Upper bound for one consolidation retry delay. */
+  consolidationRetryMaxDelayMs?: number
   /** Memory-worker model override. */
   model?: ConfiguredModel
   /** Log observer/reflector/dropper progress lines (warnings and errors always log). */
@@ -115,6 +123,10 @@ export interface ResolvedConfig {
   observationsPoolMaxTokens: number
   observationsPoolTargetTokens?: number
   agentMaxTurns: number
+  workerTimeoutMs: number
+  consolidationRetryMaxAttempts: number
+  consolidationRetryBaseDelayMs: number
+  consolidationRetryMaxDelayMs: number
   model?: ConfiguredModel
   showWorkerNotifications: boolean
   passive: boolean
@@ -145,6 +157,10 @@ const fields = {
   observationsPoolMaxTokens: z.number().step(1).min(1).default(20_000),
   observationsPoolTargetTokens: z.number().step(1).min(1),
   agentMaxTurns: z.number().step(1).min(1).default(16),
+  workerTimeoutMs: z.number().step(1).min(1).max(2_147_483_647).default(120_000),
+  consolidationRetryMaxAttempts: z.number().step(1).min(0).default(5),
+  consolidationRetryBaseDelayMs: z.number().step(1).min(0).max(2_147_483_647).default(1_000),
+  consolidationRetryMaxDelayMs: z.number().step(1).min(0).max(2_147_483_647).default(30_000),
   // An absent model override must stay absent: schemastery objects resolve
   // even when the key is missing, so an `undefined` default marks it optional
   // (cast: `default(value: T)` predates optional objects).

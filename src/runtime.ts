@@ -2,13 +2,15 @@
  * Shared plugin runtime: effective config, the ledger store, per-session
  * in-flight guards, worker error memory, and worker-model resolution.
  */
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Session, SessionId } from '@deepseek-ai/dsh-session'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { resolveDshHome } from './home.ts'
 import { resolveConfig, type Config, type ResolvedConfig } from './config.ts'
 import { DebugLog } from './debug-log.ts'
-import { LedgerStore } from './ledger/store.ts'
+import { LedgerStore, ledgerFileName } from './ledger/store.ts'
 import type { WorkerModelTarget } from './workers/observer.ts'
 
 export type WorkerPhase = 'observer' | 'reflector' | 'dropper'
@@ -46,7 +48,7 @@ export class OmRuntime {
   readonly consolidationInFlight = new Set<string>()
   private readonly consolidationOwners = new Map<string, symbol>()
   /** Latest automatic trigger coalesced while a session pipeline is active. */
-  readonly consolidationPending = new Map<string, Session>()
+  readonly consolidationPending = new Map<string, { session: Session; allowUninherited: boolean }>()
   /** Claim one session pipeline; only the returned owner may release it. */
   claimConsolidation(sessionId: string): symbol | undefined {
     if (this.consolidationOwners.has(sessionId)) return undefined
@@ -80,15 +82,20 @@ export class OmRuntime {
     const sessionId = session.id
     this.cancelConsolidationRetryTimer(sessionId)
     const attempt = (this.consolidationRetryAttempts.get(sessionId) ?? 0) + 1
-    if (attempt > 5) return
+    const config = this.config
+    if (attempt > config.consolidationRetryMaxAttempts) return
     this.consolidationRetryAttempts.set(sessionId, attempt)
+    const delayMs = Math.min(
+      config.consolidationRetryBaseDelayMs * 2 ** (attempt - 1),
+      config.consolidationRetryMaxDelayMs,
+    )
     const timer = setTimeout(() => {
       this.consolidationRetryTimers.delete(sessionId)
       retry()
-    }, Math.min(1_000 * 2 ** (attempt - 1), 30_000))
+    }, delayMs)
     timer.unref?.()
     this.consolidationRetryTimers.set(sessionId, timer)
-    this.debug(sessionId, 'consolidation.retry_scheduled', { attempt, delayMs: Math.min(1_000 * 2 ** (attempt - 1), 30_000) })
+    this.debug(sessionId, 'consolidation.retry_scheduled', { attempt, delayMs })
   }
 
   /** Stop retrying after success, manual intervention, passive mode or no backlog. */
@@ -107,7 +114,9 @@ export class OmRuntime {
   /** Sessions with a proactive compaction currently in flight. */
   readonly compactInFlight = new Set<string>()
   /** Fork-ledger inheritance runs in flight, deduped per session. */
-  private readonly inheritanceInFlight = new Map<string, Promise<void>>()
+  private readonly inheritanceInFlight = new Map<string, { task: Promise<void>; strict: boolean }>()
+  /** Parentless DSH ≥0.2.2 forks whose explicit rollback inheritance completed. */
+  private readonly explicitForkInheritance = new Set<string>()
 
   readonly lastObserverError = new Map<string, string>()
   readonly lastReflectorError = new Map<string, string>()
@@ -275,6 +284,7 @@ export class OmRuntime {
     // same-id reattach run concurrently with the old task; their finally
     // blocks release them after the work actually settles.
     this.consolidationPending.delete(sessionId)
+    this.explicitForkInheritance.delete(sessionId)
     this.clearConsolidationRetry(sessionId)
   }
 
@@ -298,40 +308,107 @@ export class OmRuntime {
    * inherited" (the store reports and swallows them) — memory work must
    * never break the session pipeline.
    */
-  async ensureInherited(ctx: Context, session: Session): Promise<void> {
-    const parentId = session.header.parentSession
-    if (parentId === undefined) return
+  async ensureInherited(ctx: Context, session: Session): Promise<boolean> {
+    if (session.header.origin === 'subagent') return true
     // The durable fork cut: inherited events occupy seqs 0..count-1, so the
     // last inherited seq is count-1 (a 0-count fork is an empty prefix).
     const inheritedCount: number = session.inheritedEventCount
-    if (typeof inheritedCount !== 'number' || inheritedCount <= 0) return
+    if (typeof inheritedCount !== 'number' || inheritedCount <= 0) return true
     const sessionId: string = session.id
-    const pending = this.inheritanceInFlight.get(sessionId)
-    if (pending) return pending
-    const task = this.inheritLineage(ctx, sessionId, parentId, inheritedCount - 1)
-    this.inheritanceInFlight.set(sessionId, task)
-    try {
-      await task
-    } finally {
-      this.inheritanceInFlight.delete(sessionId)
+    const parentId = session.header.parentSession
+    if (parentId === undefined) {
+      // DSH ≥0.2.2 deliberately persists no source id on an ordinary fork.
+      // Only this plugin's rollback RPC can prove that relationship. Defer the
+      // creation-time trigger so that RPC can win the race; a later new turn or
+      // explicit manual run may deliberately start fresh if no RPC arrives.
+      // A nonempty copied ledger survives Host restarts without a marker;
+      // zero-record completion uses the persistent marker below.
+      if (this.explicitForkInheritance.has(sessionId)) return true
+      if ((await this._store.load(sessionId)).length > 0) return true
+      // A valid fork may have zero records to copy. Persist completion so an
+      // empty inheritance does not disable this branch forever after dispose,
+      // Host restart, or a new plugin runtime.
+      try {
+        const marker = JSON.parse(await readFile(this.forkInheritanceMarkerPath(sessionId), 'utf8')) as {
+          version?: unknown
+          sourceSessionId?: unknown
+          boundary?: unknown
+        }
+        if (marker.version !== 1 || typeof marker.sourceSessionId !== 'string'
+          || typeof marker.boundary !== 'number' || !Number.isSafeInteger(marker.boundary)) throw new Error('invalid marker')
+        this.explicitForkInheritance.add(sessionId)
+        return true
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+          this.onError(`failed to read fork inheritance marker for session ${sessionId}: ${String(error)}`)
+        }
+        return false
+      }
+    }
+    await this.runInheritance(ctx, sessionId, parentId, inheritedCount - 1)
+    return true
+  }
+
+  /**
+   * Inherit a DSH ≥0.2.2 parentless rollback fork after the Host API has
+   * validated its source and exact event-prefix cut. Also safe on legacy hosts:
+   * an already inherited/nonempty child ledger makes the operation idempotent.
+   */
+  async inheritFork(ctx: Context, session: Session, parentId: SessionId, boundary: number): Promise<boolean> {
+    const sessionId: string = session.id
+    if (this.explicitForkInheritance.has(sessionId)) return false
+    await this.runInheritance(ctx, sessionId, parentId, boundary, true)
+    const markerPath = this.forkInheritanceMarkerPath(sessionId)
+    await mkdir(dirname(markerPath), { recursive: true })
+    await writeFile(markerPath, `${JSON.stringify({ version: 1, sourceSessionId: parentId, boundary })}\n`, 'utf8')
+    this.explicitForkInheritance.add(sessionId)
+    return true
+  }
+
+  /** Durable completion marker, including the zero-record inheritance case. */
+  private forkInheritanceMarkerPath(sessionId: string): string {
+    return join(storageRoot(this.config), 'inheritance', ledgerFileName(sessionId).replace(/\.jsonl$/, '.json'))
+  }
+
+  /** Share one inheritance pass between legacy discovery and explicit RPC. */
+  private async runInheritance(ctx: Context, sessionId: string, parentId: SessionId, boundary: number, strict = false): Promise<void> {
+    while (true) {
+      const pending = this.inheritanceInFlight.get(sessionId)
+      if (pending && (pending.strict || !strict)) return pending.task
+      if (pending) {
+        // A best-effort legacy pass cannot prove durable completion. Wait for
+        // it, then rerun through strict reads/writes before writing a marker.
+        await pending.task.catch(() => {})
+        continue
+      }
+      const task = this.inheritLineage(ctx, sessionId, parentId, boundary, strict)
+      const running = { task, strict }
+      this.inheritanceInFlight.set(sessionId, running)
+      try {
+        await task
+      } finally {
+        if (this.inheritanceInFlight.get(sessionId) === running) this.inheritanceInFlight.delete(sessionId)
+      }
+      return
     }
   }
 
   /** One inheritance pass: walk up the lineage to the nearest usable ledger. */
-  private async inheritLineage(ctx: Context, sessionId: string, parentId: SessionId, boundary: number): Promise<void> {
-    const own = await this._store.load(sessionId)
+  private async inheritLineage(ctx: Context, sessionId: string, parentId: SessionId, boundary: number, strict: boolean): Promise<void> {
+    const own = strict ? await this._store.loadStrict(sessionId) : await this._store.load(sessionId)
     if (own.length > 0) return
     const visited = new Set<string>([sessionId])
     let ancestorId: SessionId | undefined = parentId
     while (ancestorId !== undefined && !visited.has(ancestorId)) {
       visited.add(ancestorId)
-      const entries = await this._store.load(ancestorId)
+      const entries = strict ? await this._store.loadStrict(ancestorId) : await this._store.load(ancestorId)
       const inherited = entries.filter((entry) =>
         entry.kind === 'visible-memory' ? entry.upToSeq <= boundary : entry.coversUpToSeq <= boundary)
       if (inherited.length > 0) {
         // One cache update + one write for the whole batch, not one
         // appendFile per record.
-        await this._store.appendAll(sessionId, inherited)
+        if (strict) await this._store.appendAllStrict(sessionId, inherited)
+        else await this._store.appendAll(sessionId, inherited)
         this.debug(sessionId, 'ledger.inherited', { from: ancestorId, records: inherited.length, throughSeq: boundary })
         if (this._config.showWorkerNotifications) {
           ctx.logger.info(
@@ -341,8 +418,10 @@ export class OmRuntime {
         return
       }
       // The ancestor's ledger has nothing within the boundary (possibly
-      // nothing at all); its own fork parent may still hold usable records.
-      ancestorId = ctx.sessions.get(ancestorId)?.header.parentSession
+      // nothing at all); its own legacy fork parent may still hold usable
+      // records. A subagent parent is ownership metadata, never fork lineage.
+      const ancestor = ctx.sessions.get(ancestorId)
+      ancestorId = ancestor?.header.origin === 'subagent' ? undefined : ancestor?.header.parentSession
     }
   }
 
@@ -353,13 +432,15 @@ export class OmRuntime {
    * Resolution failure is not an error here — the ratio fallback covers it.
    */
   async sessionContextWindow(ctx: Context, session: Session, agent: Agent | undefined): Promise<number | undefined> {
+    const current = currentModelSelection(agent)
     const routed = session.requestHeader()?.config
-    const target =
+    const target = current ?? (
       routed && routed.provider.length > 0 && routed.model.length > 0
         ? { provider: routed.provider, model: routed.model }
         : agent && agent.options.provider && agent.options.model
           ? { provider: agent.options.provider, model: agent.options.model }
           : defaultSelection(ctx)
+    )
     if (!target) return undefined
     const key = `${target.provider}/${target.model}`
     if (this.contextWindowCache.has(key)) return this.contextWindowCache.get(key)
@@ -385,13 +466,15 @@ export class OmRuntime {
    */
   async resolveModel(ctx: Context, session: Session, agent: Agent | undefined): Promise<ResolveResult> {
     const configured = this._config.model
+    const current = currentModelSelection(agent)
     const routed = session.requestHeader()?.config
-    const fallback =
+    const fallback = current ?? (
       routed && routed.provider.length > 0 && routed.model.length > 0
         ? { provider: routed.provider, model: routed.model, reasoningEffort: routed.reasoningEffort }
         : agent && agent.options.provider && agent.options.model
           ? { provider: agent.options.provider, model: agent.options.model, reasoningEffort: agent.options.reasoningEffort }
           : defaultSelection(ctx)
+    )
 
     // Suspension: once a configured override has failed
     // `modelFallbackAfterFailures` consecutive worker runs, it stops being
@@ -446,6 +529,21 @@ export class OmRuntime {
       }
     }
   }
+}
+
+/** DSH ≥0.2.2's pending/last-used choice; absent on older hosts. */
+function currentModelSelection(
+  agent: Agent | undefined,
+): { provider: string; model: string; reasoningEffort?: string } | undefined {
+  try {
+    const current = (agent as unknown as {
+      model?: { current?: () => { provider: string; model: string; reasoningEffort?: string } | undefined }
+    } | undefined)?.model?.current?.()
+    if (current && current.provider.length > 0 && current.model.length > 0) return { ...current }
+  } catch {
+    // A weak cross-generation read must not disable the older fallback chain.
+  }
+  return undefined
 }
 
 /** The deployment's default model selection, when the service is mounted. */

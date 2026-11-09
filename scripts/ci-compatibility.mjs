@@ -19,8 +19,9 @@ export function readCompatibility(path = 'package.json') {
     if (!config || typeof config !== 'object' || Array.isArray(config)
       || typeof config.cordis !== 'string' || !/^~?\d+\.\d+\.\d+$/.test(config.cordis)
       || typeof config.schemastery !== 'string' || !exactVersion.test(config.schemastery)
-      || Object.keys(config).some(key => !['cordis', 'schemastery', 'overrides'].includes(key))) {
-      throw new Error(`dshCompatibility ${version} requires exact cordis/schemastery versions and optional exact overrides`)
+      || (config.node !== undefined && (typeof config.node !== 'string' || !/^>=\d+\.\d+\.\d+$/.test(config.node)))
+      || Object.keys(config).some(key => !['cordis', 'schemastery', 'overrides', 'node'].includes(key))) {
+      throw new Error(`dshCompatibility ${version} requires exact cordis/schemastery versions and optional exact overrides/Node floor`)
     }
     if (config.overrides !== undefined) {
       if (!config.overrides || typeof config.overrides !== 'object' || Array.isArray(config.overrides)
@@ -30,6 +31,32 @@ export function readCompatibility(path = 'package.json') {
     }
   }
   return { manifest, entries }
+}
+
+/** Whether a host cohort has any supported release in a Node major. */
+export function supportsNodeMajor(config, major) {
+  if (config.node === undefined) return true
+  return major >= minimumNode(config)[0]
+}
+
+/** Whether an exact Node version satisfies the cohort's inclusive floor. */
+export function supportsNodeVersion(config, version) {
+  if (config.node === undefined) return true
+  const current = version.replace(/^v/, '').split('.').map(Number)
+  if (current.length !== 3 || current.some(part => !Number.isSafeInteger(part))) {
+    throw new Error(`Invalid Node version ${version}`)
+  }
+  const minimum = minimumNode(config)
+  for (let index = 0; index < 3; index++) {
+    if (current[index] !== minimum[index]) return current[index] > minimum[index]
+  }
+  return true
+}
+
+function minimumNode(config) {
+  const match = config.node.match(/^>=(\d+)\.(\d+)\.(\d+)$/)
+  if (!match) throw new Error(`Unsupported Node requirement ${config.node}`)
+  return match.slice(1).map(Number)
 }
 
 function main() {
@@ -64,7 +91,10 @@ function main() {
     }
     if (changed) writeFileSync('package.json', `${JSON.stringify(manifest, null, 2)}\n`)
     console.log(`changed=${changed}`)
-    if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `changed=${changed}\n`)
+    if (process.env.GITHUB_OUTPUT) {
+      appendFileSync(process.env.GITHUB_OUTPUT, `changed=${changed}\n`)
+      appendFileSync(process.env.GITHUB_OUTPUT, `node22=${supportsNodeMajor(entries[version], 22)}\n`)
+    }
   } else {
     throw new Error('Usage: node scripts/ci-compatibility.mjs matrix | select <version>')
   }

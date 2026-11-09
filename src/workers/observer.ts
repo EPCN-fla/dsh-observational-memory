@@ -26,6 +26,7 @@ export interface RunObserverOptions {
   chunk: string
   allowedSourceEventSeqs: number[]
   maxTurns: number
+  timeoutMs?: number
   signal?: AbortSignal
 }
 
@@ -195,6 +196,7 @@ ${conversation}`
     userText,
     tools: [recordObservations],
     maxTurns: options.maxTurns,
+    timeoutMs: options.timeoutMs,
     ...(options.target.maxTokens !== undefined ? { maxTokens: options.target.maxTokens } : {}),
     ...(options.target.reasoningEffort !== undefined ? { reasoningEffort: options.target.reasoningEffort } : {}),
     ...(options.signal !== undefined ? { signal: options.signal } : {}),

@@ -27,6 +27,10 @@ describe('Config schema', () => {
     expect(config.compactAfterTokensRatio).toBe(0.68)
     expect(config.observationsPoolMaxTokens).toBe(20_000)
     expect(config.agentMaxTurns).toBe(16)
+    expect(config.workerTimeoutMs).toBe(120_000)
+    expect(config.consolidationRetryMaxAttempts).toBe(5)
+    expect(config.consolidationRetryBaseDelayMs).toBe(1_000)
+    expect(config.consolidationRetryMaxDelayMs).toBe(30_000)
     expect(config.passive).toBe(false)
     expect(config.debugLog).toBe(false)
     expect(config.showWorkerNotifications).toBe(true)
@@ -37,6 +41,27 @@ describe('Config schema', () => {
     expect(config.observeAfterTokens).toBe(5000)
     expect(config.passive).toBe(true)
     expect(config.model).toEqual({ provider: 'p', id: 'm' })
+  })
+
+  it('accepts custom worker timing and retry values but rejects invalid ones', () => {
+    const config = PlainConfig({
+      workerTimeoutMs: 5_000,
+      consolidationRetryMaxAttempts: 0,
+      consolidationRetryBaseDelayMs: 0,
+      consolidationRetryMaxDelayMs: 250,
+    })
+    expect(config.workerTimeoutMs).toBe(5_000)
+    expect(config.consolidationRetryMaxAttempts).toBe(0)
+    expect(config.consolidationRetryBaseDelayMs).toBe(0)
+    expect(config.consolidationRetryMaxDelayMs).toBe(250)
+    expect(() => PlainConfig({ workerTimeoutMs: 0 })).toThrow()
+    expect(() => PlainConfig({ consolidationRetryMaxAttempts: -1 })).toThrow()
+    expect(() => PlainConfig({ consolidationRetryBaseDelayMs: 1.5 })).toThrow()
+    expect(() => PlainConfig({ consolidationRetryMaxDelayMs: -1 })).toThrow()
+    expect(() => PlainConfig({ workerTimeoutMs: 2_147_483_648 })).toThrow()
+    expect(() => PlainConfig({ consolidationRetryBaseDelayMs: 2_147_483_648 })).toThrow()
+    expect(() => PlainConfig({ consolidationRetryMaxDelayMs: 2_147_483_648 })).toThrow()
+    expect(PlainConfig({ workerTimeoutMs: 2_147_483_647 }).workerTimeoutMs).toBe(2_147_483_647)
   })
 })
 

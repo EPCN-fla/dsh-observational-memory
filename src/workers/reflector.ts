@@ -19,6 +19,7 @@ export interface RunReflectorOptions {
   reflections: Reflection[]
   observations: Observation[]
   maxTurns: number
+  timeoutMs?: number
   signal?: AbortSignal
 }
 
@@ -143,6 +144,7 @@ export async function runReflector(ctx: Context, options: RunReflectorOptions): 
     userText,
     tools: [recordReflections],
     maxTurns: options.maxTurns,
+    timeoutMs: options.timeoutMs,
     ...(options.target.maxTokens !== undefined ? { maxTokens: options.target.maxTokens } : {}),
     ...(options.target.reasoningEffort !== undefined ? { reasoningEffort: options.target.reasoningEffort } : {}),
     ...(options.signal !== undefined ? { signal: options.signal } : {}),
