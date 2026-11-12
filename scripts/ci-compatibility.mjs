@@ -33,12 +33,6 @@ export function readCompatibility(path = 'package.json') {
   return { manifest, entries }
 }
 
-/** Whether a host cohort has any supported release in a Node major. */
-export function supportsNodeMajor(config, major) {
-  if (config.node === undefined) return true
-  return major >= minimumNode(config)[0]
-}
-
 /** Whether an exact Node version satisfies the cohort's inclusive floor. */
 export function supportsNodeVersion(config, version) {
   if (config.node === undefined) return true
@@ -93,7 +87,6 @@ function main() {
     console.log(`changed=${changed}`)
     if (process.env.GITHUB_OUTPUT) {
       appendFileSync(process.env.GITHUB_OUTPUT, `changed=${changed}\n`)
-      appendFileSync(process.env.GITHUB_OUTPUT, `node22=${supportsNodeMajor(entries[version], 22)}\n`)
     }
   } else {
     throw new Error('Usage: node scripts/ci-compatibility.mjs matrix | select <version>')
