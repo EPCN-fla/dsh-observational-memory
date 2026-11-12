@@ -38,10 +38,6 @@
   outline-offset: -2px;
 }
 
-.headerStatic {
-  cursor: default;
-}
-
 .headText {
   flex: 1;
   min-width: 0;

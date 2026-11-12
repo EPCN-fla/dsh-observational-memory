@@ -1,4 +1,4 @@
-# Branch pushes do not run CI. PR: one job per installable DSH, Node 22 then 24.
+# Branch pushes do not run CI. PR: one Node 24 job for the exact supported DSH.
 # v* tags: independent release job with the full local gate; no matrix/uploads.
 name: ci
 
@@ -10,7 +10,7 @@ on:
 permissions:
   contents: read
 
-# Do not let a third-party mirror's availability invalidate every host cohort.
+# Do not let a third-party mirror's availability invalidate verification.
 # This also covers lock regeneration and tarball consumers spawned by scripts.
 env:
   NPM_CONFIG_REGISTRY: https://registry.npmjs.org
@@ -21,7 +21,7 @@ concurrency:
 
 jobs:
   compatibility:
-    name: Read supported DSH versions
+    name: Read supported DSH version
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -31,13 +31,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
       - name: Read package compatibility
         id: matrix
         run: node scripts/ci-compatibility.mjs matrix
 
   verify:
-    name: DSH ${{ matrix.dsh-version }} · Node 22 + 24
+    name: DSH ${{ matrix.dsh-version }} · Node 24
     needs: compatibility
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
@@ -49,11 +49,11 @@ jobs:
       DSH_TEST_VERSION: ${{ matrix.dsh-version }}
     steps:
       - uses: actions/checkout@v4
-      - name: Set up Node 22
-        id: setup22
+      - name: Set up Node 24
+        id: setup24
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
       - name: Select exact DSH cohort
         id: cohort
@@ -69,28 +69,14 @@ jobs:
             cp "$LOCK_DIR/package-lock.json" package-lock.json
             rm -rf "$LOCK_DIR"
           fi
-      - name: Verify Node 22
-        id: verify22
-        if: ${{ !cancelled() && steps.cohort.outcome == 'success' && steps.cohort.outputs.node22 != 'false' }}
-        run: node scripts/ci-verify.mjs verify 22
-      # A Node 22 failure must not hide the independent Node 24 result.
-      - name: Set up Node 24
-        id: setup24
-        if: ${{ !cancelled() }}
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: npm
       - name: Verify Node 24
         id: verify24
-        if: ${{ !cancelled() && steps.setup24.outcome == 'success' && steps.cohort.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.cohort.outcome == 'success' }}
         run: node scripts/ci-verify.mjs verify 24
       - name: Test summary
         if: always()
         env:
-          SETUP_22: ${{ steps.setup22.outcome }}
           SETUP_24: ${{ steps.setup24.outcome }}
-          VERIFY_22: ${{ steps.verify22.outcome }}
           VERIFY_24: ${{ steps.verify24.outcome }}
         run: node scripts/ci-verify.mjs summary
 

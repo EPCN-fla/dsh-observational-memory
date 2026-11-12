@@ -50,41 +50,35 @@ test('compatibility reader rejects empty, ranged and malformed metadata', () => 
   }
 }))
 
-test('the DSH 0.2.2 cohort emits its Node 24.9 floor and skips Node 22', () => fixture(root => {
-  const output = join(root, 'github-output.txt')
-  const selected = run(root, 'ci-compatibility.mjs', ['select', '0.2.2-rc.1'], { GITHUB_OUTPUT: output })
+test('the exact DSH target enforces its Node 24.9 floor', () => fixture(root => {
+  const selected = run(root, 'ci-compatibility.mjs', ['select', '0.2.2-rc.2'])
   assert.equal(selected.status, 0, selected.stderr)
-  assert.match(readFileSync(output, 'utf8'), /node22=false/)
-  const cohort = manifest.dshCompatibility['0.2.2-rc.1']
+  const cohort = manifest.dshCompatibility['0.2.2-rc.2']
   assert.equal(supportsNodeVersion(cohort, '24.8.9'), false)
   assert.equal(supportsNodeVersion(cohort, '24.9.0'), true)
   assert.equal(supportsNodeVersion(cohort, '24.10.0'), true)
-  assert.equal(supportsNodeVersion(cohort, '25.0.0'), true)
+  assert.equal(manifest.engines.node, '>=24.9.0 <25')
+  assert.equal(semver.satisfies('22.19.0', manifest.engines.node), false)
+  assert.equal(semver.satisfies('24.8.9', manifest.engines.node), false)
+  assert.equal(semver.satisfies('24.9.0', manifest.engines.node), true)
+  assert.equal(semver.satisfies('25.0.0', manifest.engines.node), false)
   mkdirSync(join(root, 'artifacts/ci'), { recursive: true })
   writeFileSync(join(root, 'artifacts/ci/node-24.json'), JSON.stringify({
-    node: 'v24.0.0', dsh: '0.2.1-rc.5', steps: [{ name: 'install', status: 'passed' }],
+    node: 'v24.0.0', dsh: '0.2.2-rc.1', steps: [{ name: 'install', status: 'passed' }],
   }))
-  const summary = run(root, 'ci-verify.mjs', ['summary'], { DSH_TEST_VERSION: '0.2.2-rc.1' })
+  const summary = run(root, 'ci-verify.mjs', ['summary'], { DSH_TEST_VERSION: '0.2.2-rc.2' })
   assert.equal(summary.status, 0, summary.stderr)
-  assert.match(summary.stdout, /\| 22 \| not required \| unsupported \|/)
+  assert.doesNotMatch(summary.stdout, /Node 22|\| 22 \|/)
   assert.doesNotMatch(summary.stdout, /passed/)
 
   const invalid = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
-  invalid.dshCompatibility['0.2.2-rc.1'].node = '22'
+  invalid.dshCompatibility['0.2.2-rc.2'].node = 'not-a-version-floor'
   writeFileSync(join(root, 'package.json'), JSON.stringify(invalid))
   assert.throws(() => readCompatibility(join(root, 'package.json')))
 }))
 
-test('every published host in the peer compatibility window has an executable matrix entry', () => {
-  assert.deepEqual(Object.keys(manifest.dshCompatibility), [
-    '0.1.5-rc.2', '0.1.5-rc.3',
-    '0.1.7-rc.1', '0.1.7-rc.2',
-    '0.2.0-rc.1', '0.2.0-rc.2',
-    '0.2.1-rc.1', '0.2.1-rc.2', '0.2.1-rc.3', '0.2.1-rc.4', '0.2.1-rc.5',
-    '0.2.2-rc.1',
-  ])
-  // 0.1.5-rc.4 remains in the peer declaration but was never published to npm.
-  assert.equal(manifest.dshCompatibility['0.1.5-rc.4'], undefined)
+test('the compatibility matrix contains only the exact supported host', () => {
+  assert.deepEqual(Object.keys(manifest.dshCompatibility), ['0.2.2-rc.2'])
 })
 
 test('every executable matrix version remains inside every DSH peer range', () => {
@@ -95,13 +89,13 @@ test('every executable matrix version remains inside every DSH peer range', () =
   }
 })
 
-test('verification records failures, continues independent checks and summarizes both Node legs', { skip: process.platform === 'win32' }, () => fixture(root => {
+test('verification records failures, continues independent checks and summarizes the Node 24 leg', { skip: process.platform === 'win32' }, () => fixture(root => {
   mkdirSync(join(root, 'bin'))
   const npm = join(root, 'bin/npm')
   writeFileSync(npm, `#!${process.execPath}\nprocess.exit(process.argv.includes(process.env.FAIL_STEP) ? 1 : 0)\n`)
   chmodSync(npm, 0o755)
   const major = process.versions.node.split('.')[0]
-  const env = { PATH: `${root}/bin:${process.env.PATH}`, DSH_TEST_VERSION: '0.2.1-rc.5', FAIL_STEP: 'typecheck' }
+  const env = { PATH: `${root}/bin:${process.env.PATH}`, DSH_TEST_VERSION: '0.2.2-rc.2', FAIL_STEP: 'typecheck' }
   const result = run(root, 'ci-verify.mjs', ['verify', major], env)
   assert.equal(result.status, 1, result.stderr)
   let report = JSON.parse(readFileSync(join(root, `artifacts/ci/node-${major}.json`)))
@@ -110,7 +104,7 @@ test('verification records failures, continues independent checks and summarizes
   const summary = run(root, 'ci-verify.mjs', ['summary'], env)
   assert.equal(summary.status, 0, summary.stderr)
   assert.match(summary.stdout, /failed/)
-  assert.match(summary.stdout, /not run/)
+  assert.match(summary.stdout, /unknown/)
   const installFailure = run(root, 'ci-verify.mjs', ['verify', major], { ...env, FAIL_STEP: 'ci' })
   assert.equal(installFailure.status, 1)
   report = JSON.parse(readFileSync(join(root, `artifacts/ci/node-${major}.json`)))
@@ -136,8 +130,9 @@ test('workflow isolates PR validation but gates tag-only publishing on the full 
   assert.equal(workflow.jobs.publish.concurrency['cancel-in-progress'], false)
   const steps = workflow.jobs.verify.steps
   assert.match(steps.find(s => s.id === 'verify24').if, /!cancelled\(\)/)
-  assert.doesNotMatch(steps.find(s => s.id === 'verify24').if, /verify22|smoke/)
-  assert.match(steps.find(s => s.id === 'verify22').if, /node22/)
+  assert.equal(steps.find(s => s.id === 'verify22'), undefined)
+  assert.equal(steps.find(s => s.id === 'setup22'), undefined)
+  assert.ok(steps.every(s => !s.with || s.with['node-version'] !== 22))
   assert.equal(steps.find(s => s.name === 'Test summary').if, 'always()')
   assert.match(steps.find(s => s.id === 'cohort').run, /mktemp/)
   for (const job of Object.values(workflow.jobs)) {

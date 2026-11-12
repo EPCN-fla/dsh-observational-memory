@@ -1,20 +1,10 @@
 /**
- * Peer-range regression guard for the DSH compatibility window.
+ * Exact-host regression guard for the intentionally narrow DSH 0.5.0 release.
  *
- * The host enforces each plugin's `peerDependencies` at install and at
- * startup with `semver.satisfies(runtimeVersion, range, { includePrerelease:
- * true })` (packages/boot/app-boot/src/plugin-compatibility.ts; that peers
- * predicate is unchanged across 0.1.7-rc.1 … 0.2.2-rc.1 — the 0.2.1 rewrite
- * only adds an opt-in `engines.dsh` alternative this plugin does not use).
- * Two failure modes have bitten in practice and must never regress:
- *
- * - exact prerelease pins go stale the moment the host bumps (`0.1.7-rc.1`
- *   refuses `0.1.7-rc.2`), and
- * - a caret on a zero-major line refuses the line's own prereleases
- *   (`^0.2.0` refuses `0.2.0-rc.1` because rc < release).
- *
- * This test mirrors the host's exact semver call so a range edit that drops
- * a supported host — or admits an unverified one — fails here first.
+ * The host enforces each plugin's `peerDependencies` at install and startup
+ * with `semver.satisfies(runtimeVersion, range, { includePrerelease: true })`.
+ * This release supports only DSH 0.2.2-rc.2: even adjacent release candidates
+ * must be refused until a later plugin release explicitly audits and admits them.
  */
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -30,52 +20,15 @@ const manifest = JSON.parse(
 const admits = (hostVersion: string, range: string): boolean =>
   semver.satisfies(hostVersion, range, { includePrerelease: true })
 
-/** Host versions this plugin release supports, per the migration audits. */
-const SUPPORTED_HOSTS = [
-  // 0.1.5 prerelease line (the plugin's original window).
-  '0.1.5-rc.2',
-  '0.1.5-rc.3',
-  '0.1.5-rc.4',
-  // 0.1.7 release candidates (0.1.7-rc.1 … rc.2 audited; format guards and
-  // every consumed contract verified identical).
-  '0.1.7-rc.1',
-  '0.1.7-rc.2',
-  // 0.2.0 release candidates (rc.1/rc.2 audited — no consumed surface moved).
-  '0.2.0-rc.1',
-  '0.2.0-rc.2',
-  // 0.2.1 release candidates (the rc.1 chat-node owner share moved to
-  // render factories — adapted in src/client/user-message.tsx).
-  '0.2.1-rc.1',
-  '0.2.1-rc.2',
-  '0.2.1-rc.3',
-  '0.2.1-rc.4',
-  '0.2.1-rc.5',
-  // 0.2.2 release candidates (Node >=24.9; pending model selection and
-  // parentless ordinary forks adapted in runtime/client integration).
-  '0.2.2-rc.1',
-  // The windows are `>=`-floored inside each prerelease line by design:
-  // future rcs of an already-audited line install without a plugin release.
-  '0.1.7-rc.99',
-  '0.2.0-rc.99',
-  '0.2.1-rc.99',
-  '0.2.2-rc.99',
-] as const
-
-/**
- * Hosts the range must keep refusing. The windows close BELOW each line's
- * final release on purpose: only audited prerelease lines are admitted, so
- * a final (0.1.7, 0.2.0, 0.2.1) or the next line (0.3.0) always requires a
- * conscious range widening here — never a silent install.
- */
+const SUPPORTED_HOSTS = ['0.2.2-rc.2'] as const
 const REFUSED_HOSTS = [
-  '0.1.4',
-  '0.1.5-rc.1',
-  '0.1.5',
-  '0.1.6',
-  '0.1.7',
-  '0.2.0',
-  '0.2.1-alpha.1',
-  '0.2.1',
+  '0.1.5-rc.2',
+  '0.1.7-rc.2',
+  '0.2.0-rc.2',
+  '0.2.1-rc.5',
+  '0.2.2-alpha.3',
+  '0.2.2-rc.1',
+  '0.2.2-rc.3',
   '0.2.2',
   '0.3.0',
 ] as const
@@ -97,9 +50,8 @@ describe('DSH peer ranges', () => {
     ])
   })
 
-  it('keeps every DSH peer on one identical range', () => {
-    const ranges = new Set(dshPeers.map(([, range]) => range))
-    expect([...ranges]).toHaveLength(1)
+  it('pins every DSH peer to the exact supported host', () => {
+    expect(new Set(dshPeers.map(([, range]) => range))).toEqual(new Set(['0.2.2-rc.2']))
   })
 
   for (const host of SUPPORTED_HOSTS) {
@@ -118,13 +70,12 @@ describe('DSH peer ranges', () => {
     })
   }
 
-  it('keeps the @deepseek-ai devDependency cohort on one exact version', () => {
+  it('keeps the @deepseek-ai devDependency cohort on the exact supported host', () => {
     const versions = new Set(
       Object.entries(manifest.devDependencies)
         .filter(([name]) => name.startsWith('@deepseek-ai/dsh-'))
         .map(([, version]) => version),
     )
-    expect([...versions]).toHaveLength(1)
-    expect([...versions][0]).toMatch(/^\d+\.\d+\.\d+(-[0-9a-z.]+)?$/)
+    expect(versions).toEqual(new Set(['0.2.2-rc.2']))
   })
 })

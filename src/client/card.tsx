@@ -22,8 +22,6 @@ export interface ObservationalMemoryCardProps {
   save: OmCardFace['save']
   discard: OmCardFace['discard']
   retryCatalog: OmCardFace['retryCatalog']
-  /** Render the plugin-manager page form without disclosure controls. */
-  fixedOpen?: boolean
 }
 
 interface NumberFieldDef {
@@ -248,21 +246,23 @@ export function ObservationalMemoryCard(props: ObservationalMemoryCardProps) {
   const { t } = props
   const state = props.useOmCard((snapshot) => snapshot)
   const [open, setOpen] = useState(false)
-  const expanded = props.fixedOpen === true || open
-  const saveStarted = useRef(false)
+  const expanded = open
+  const saveRequested = useRef(false)
 
   // Collapse only after a Host-confirmed save; a failed write keeps its
   // diagnostics and drafts visible for correction.
   useEffect(() => {
-    if (props.fixedOpen) return
-    if (state.saving) {
-      saveStarted.current = true
+    if (!saveRequested.current || state.saving) return
+    if (state.failed) {
+      saveRequested.current = false
       return
     }
-    if (!saveStarted.current) return
-    saveStarted.current = false
-    if (!state.dirty && !state.failed) setOpen(false)
-  }, [props.fixedOpen, state.dirty, state.failed, state.saving])
+    // A scope notification can publish an intermediate dirty state. Keep the
+    // request armed until the Host-confirmed write clears the staged drafts.
+    if (state.dirty) return
+    saveRequested.current = false
+    setOpen(false)
+  }, [state.dirty, state.failed, state.saving])
 
   if (!state.available) return null
 
@@ -273,6 +273,12 @@ export function ObservationalMemoryCard(props: ObservationalMemoryCardProps) {
   const modelInvalid =
     (state.fields['model.provider']?.text.trim() === '') !== (state.fields['model.id']?.text.trim() === '')
   const blocked = !state.dirty || state.invalid || state.saving || modelInvalid
+  const requestSave = (): void => {
+    // React may batch the saving and completion snapshots, so observing
+    // `saving` in an effect is not a reliable save-start signal.
+    saveRequested.current = true
+    props.save()
+  }
 
   // Only the threshold parameter the selected mode shows is rendered (and
   // effective); the other stays hidden whatever it is set to.
@@ -335,30 +341,20 @@ export function ObservationalMemoryCard(props: ObservationalMemoryCardProps) {
 
   return (
     <li className={`${css.card} ${expanded ? css.cardOpen : ''}`}>
-      {props.fixedOpen ? (
-        <div className={`${css.header} ${css.headerStatic}`}>
-          <span className={css.headText}>
-            <span className={css.name}>{t('card.title')}</span>
-            <span className={css.description}>{t('card.description')}</span>
-          </span>
-          {state.dirty ? <span className={css.tag}>{t('state.unsaved')}</span> : null}
-        </div>
-      ) : (
-        <button
-          type="button"
-          className={css.header}
-          aria-expanded={open}
-          aria-label={`${t(open ? 'state.collapse' : 'state.expand')}: ${t('card.title')}`}
-          onClick={() => setOpen(!open)}
-        >
-          <span className={css.headText}>
-            <span className={css.name}>{t('card.title')}</span>
-            <span className={css.description}>{t('card.description')}</span>
-          </span>
-          {state.dirty ? <span className={css.tag}>{t('state.unsaved')}</span> : null}
-          <span className={`${css.chevron} ${open ? css.chevronOpen : ''}`} aria-hidden="true">▾</span>
-        </button>
-      )}
+      <button
+        type="button"
+        className={css.header}
+        aria-expanded={open}
+        aria-label={`${t(open ? 'state.collapse' : 'state.expand')}: ${t('card.title')}`}
+        onClick={() => setOpen(!open)}
+      >
+        <span className={css.headText}>
+          <span className={css.name}>{t('card.title')}</span>
+          <span className={css.description}>{t('card.description')}</span>
+        </span>
+        {state.dirty ? <span className={css.tag}>{t('state.unsaved')}</span> : null}
+        <span className={`${css.chevron} ${open ? css.chevronOpen : ''}`} aria-hidden="true">▾</span>
+      </button>
       {expanded ? (
         <div className={css.body}>
           {!state.writable ? <p className={css.readOnly} role="status">{t('state.readOnly')}</p> : null}
@@ -467,7 +463,7 @@ export function ObservationalMemoryCard(props: ObservationalMemoryCardProps) {
             >
               {t('action.discard')}
             </button>
-            <button type="button" className={css.save} disabled={blocked} onClick={props.save}>
+            <button type="button" className={css.save} disabled={disabled || blocked} onClick={requestSave}>
               {t(state.saving ? 'action.saving' : 'action.save')}
             </button>
           </div>
@@ -486,7 +482,5 @@ export function ObservationalMemoryCard(props: ObservationalMemoryCardProps) {
  */
 export function ObservationalMemoryBundleConfig(props: ObservationalMemoryCardProps & { view: 'summary' | 'page' }) {
   if (props.view === 'summary') return <>{props.t('card.description')}</>
-  // The page view IS the configuration page: keep the form visible without
-  // the collapsible card chrome the settings-list row uses, including after saves.
-  return <ObservationalMemoryCard {...props} fixedOpen />
+  return <ObservationalMemoryCard {...props} />
 }
