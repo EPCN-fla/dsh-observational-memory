@@ -268,9 +268,9 @@ describe('ObservationalMemoryCard model cascade', () => {
 })
 
 describe('ObservationalMemoryBundleConfig (DSH ≥0.1.7 bundle page entry)', () => {
-  async function mountBundle(view: 'summary' | 'page') {
+  async function mountBundle(view: 'summary' | 'page', scope = fakeScope({})) {
     const { ObservationalMemoryBundleConfig } = await import('../src/client/card.tsx')
-    const controller = new OmCardController(fakeScope({}), CARD_FIELDS, catalogRpc)
+    const controller = new OmCardController(scope, CARD_FIELDS, catalogRpc)
     const face = controller.inject()
     const useOmCard = <S,>(selector: (state: OmCardState) => S): S =>
       useSyncExternalStore(face.hooks.omCard.subscribe, () => selector(face.hooks.omCard.getSnapshot()))
@@ -297,9 +297,14 @@ describe('ObservationalMemoryBundleConfig (DSH ≥0.1.7 bundle page entry)', () 
     expect(container.querySelector('button[aria-expanded]')).toBeNull()
   })
 
-  it('renders the page form fixed open without disclosure controls', async () => {
+  it('renders the page card collapsed by default and expands on demand', async () => {
     await mountBundle('page')
-    expect(container.querySelector('button[aria-expanded]')).toBeNull()
+    const header = container.querySelector<HTMLButtonElement>('button[aria-expanded]')
+    expect(header?.getAttribute('aria-expanded')).toBe('false')
+    expect(container.querySelector('#om-observeAfterTokens')).toBeNull()
+
+    expand()
+    expect(header?.getAttribute('aria-expanded')).toBe('true')
     expect(container.querySelector('#om-observeAfterTokens')).not.toBeNull()
     expect(container.querySelector('#om-workerTimeoutMs')).not.toBeNull()
     expect(container.querySelector('#om-consolidationRetryMaxAttempts')).not.toBeNull()
@@ -308,8 +313,9 @@ describe('ObservationalMemoryBundleConfig (DSH ≥0.1.7 bundle page entry)', () 
     expect(container.querySelector('#om-storageDir')).not.toBeNull()
   })
 
-  it('keeps the page form expanded after a successful save', async () => {
+  it('collapses the page card after a successful save', async () => {
     await mountBundle('page')
+    expand()
     const input = container.querySelector<HTMLInputElement>('#om-observeAfterTokens')!
     const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
     act(() => {
@@ -317,8 +323,28 @@ describe('ObservationalMemoryBundleConfig (DSH ≥0.1.7 bundle page entry)', () 
       input.dispatchEvent(new Event('input', { bubbles: true }))
     })
     await save()
-    expect(container.querySelector('#om-observeAfterTokens')).not.toBeNull()
-    expect(container.querySelector('#om-storageDir')).not.toBeNull()
-    expect(container.querySelector('button[aria-expanded]')).toBeNull()
+    expect(container.querySelector('button[aria-expanded]')?.getAttribute('aria-expanded')).toBe('false')
+    expect(container.querySelector('#om-observeAfterTokens')).toBeNull()
+    expect(container.querySelector('#om-storageDir')).toBeNull()
+  })
+
+  it('keeps the page card open with its draft when a save fails', async () => {
+    const base = fakeScope({})
+    const failing: SettingsScopeLike = {
+      ...base,
+      set: async () => { throw new Error('profile storage is read-only') },
+    }
+    await mountBundle('page', failing)
+    expand()
+    const input = container.querySelector<HTMLInputElement>('#om-observeAfterTokens')!
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
+    act(() => {
+      setter.call(input, '10001')
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    await save()
+    expect(container.querySelector('button[aria-expanded]')?.getAttribute('aria-expanded')).toBe('true')
+    expect(container.querySelector<HTMLInputElement>('#om-observeAfterTokens')?.value).toBe('10001')
+    expect(container.textContent).toContain(en['state.saveFailed'])
   })
 })
