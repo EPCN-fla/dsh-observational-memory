@@ -61,6 +61,7 @@ The correspondence matrix between plugin versions and DSH versions is as follows
 
 | Plugin version | Minimum compatible DSH version | Highest compatible DSH version |
 | --- | --- | --- |
+| 0.5.0 | 0.2.2-rc.2 | 0.2.2-rc.2 |
 | 0.4.4 | 0.1.5-rc.2 | 0.2.2-rc.1 |
 | 0.4.3 | 0.1.5-rc.2 | 0.2.1-rc.5 |
 | 0.4.2 | 0.1.5-rc.2 | 0.2.1-rc.4 |
@@ -72,7 +73,7 @@ The correspondence matrix between plugin versions and DSH versions is as follows
 | 0.1.3 | 0.1.5-rc.2 | 0.1.5-rc.2 |
 | 0.1.2 | 0.1.5-rc.2 | 0.1.5-rc.2 |
 
-Peer ranges admit later RCs in the same prerelease line, but the table records only versions actually verified; future RCs still need regression validation. On 0.1.7 and later the plugin serves the profile-owned live configuration; on 0.1.5 it falls back to the legacy settings.yaml section, and the legacy document is imported automatically on the first 0.1.7 boot. DSH 0.2.2-rc.1 requires Node.js `>=24.9.0`; older DSH cohorts retain their original Node support.
+Starting with `0.5.0`, this plugin supports only DSH `0.2.2-rc.2`: every DSH peer is pinned to that exact version, and other RCs or final releases are outside this release’s support boundary. It requires Node.js 24 at `24.9.0` or later (`>=24.9.0 <25`), matching DSH’s official Node 24.9 minimum while deliberately excluding other Node majors.
 
 Add the plugin to a profile through the DSH CLI (`web` shown here; substitute as needed). The package ships a `cordis.patch.yml`, so the composer mounts the host half automatically and serves `/plugins/dsh-observational-memory/client.js` to the Web client — no extra composition wiring.
 
@@ -88,7 +89,7 @@ dsh plugin --profile web add dsh-observational-memory
 dsh plugin --profile web add github:EPCN-fla/dsh-observational-memory
 ```
 
-For git-source installs, npm runs the package's `prepare` script to build automatically (requires Node `^22.19.0` or `>=24`).
+For git-source installs, npm runs the package's `prepare` script to build automatically (requires Node `>=24.9.0 <25`).
 
 ### From tarball
 
@@ -115,7 +116,7 @@ Restart DSH Web afterwards. Verify the mount: `dsh --profile web --dump-config |
 
 ### The settings card
 
-Open **Settings → Plugins** and select **dsh-observational-memory** to reach its package page; edit the **Observational Memory** configuration card there — edits apply live on **Save**, no restart. (On 0.1.5 hosts the card lives under Settings → Plugins → Plugin configuration instead.) The card is bilingual (中文/English) and follows the DSH language setting.
+Open **Settings → Plugins** and select **dsh-observational-memory** to reach its package page. The **Observational Memory** configuration card starts collapsed; click its title to expand it. **Save** applies edits live without a restart and collapses the card after success; a failed save keeps the card open with its drafts intact. The card is bilingual (中文/English) and follows the DSH language setting.
 
 - **Thresholds**: the compaction-threshold mode decides which single threshold parameter is shown — `calibrated` shows the static threshold, `ratio` shows the window ratio. Only the shown parameter is effective; the hidden one is inert however it is set.
 - **Model (optional)**: cascading provider → model ID → reasoning-effort dropdowns fed by the models added to DSH; a downstream dropdown stays empty until its upstream pick is made. Leave everything blank to let memory workers follow the session model.
@@ -141,7 +142,7 @@ The agent can call `recall(id)` with a 12-character lowercase hex memory id to r
 
 Every user message (steering messages included) gains a **rollback** button left of its copy button: clicking it forks the session at the completed-turn boundary right before that message, opens the child session, and restores the message text into its composer — ready to edit and resend. The operation is non-destructive: the source session keeps its history on its own branch.
 
-The new branch **inherits** the source session's memory through the fork point (observations, reflections, drop records and visible memory), so a rollback never restarts memory from scratch; records covering only the abandoned branch (events past the fork point) stay behind. DSH 0.2.2 no longer persists an ordinary fork's source, so this plugin explicitly inherits after creating the rollback and before restoring its draft through a Host RPC that validates the shared event prefix. Older hosts retain the first-touch Header-lineage walk. Passive mode does not affect inheritance.
+The new branch **inherits** the source session's memory through the fork point (observations, reflections, drop records and visible memory), so a rollback never restarts memory from scratch; records covering only the abandoned branch (events past the fork point) stay behind. DSH 0.2.2 no longer persists an ordinary fork's source, so this plugin explicitly inherits after creating the rollback and before restoring its draft through a Host RPC that validates the shared event prefix. Passive mode does not affect inheritance.
 
 DSH can only cut sessions at turn boundaries, so the button stays disabled (with an explanatory tooltip) for first-turn messages (no earlier boundary to roll back to), messages with attachments (a draft cannot restore uploads), and textless messages. Unloading the plugin restores the built-in user message rendering.
 
@@ -209,7 +210,7 @@ Deployments can also preset composition-layer values through the plugin's cordis
 
 ## Development
 
-Requires Node `^22.19.0` or `>=24`.
+Requires Node `>=24.9.0 <25`.
 
 ```sh
 npm install         # install dependencies
