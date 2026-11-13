@@ -263,6 +263,16 @@ export interface OmCardFace extends OmCardActions {
 
 type StagedEdit = { text: string; clear: boolean }
 
+/** Compare the Host-normalized model route by value, not object key order. */
+function sameModelRoute(stored: unknown, expected: unknown): boolean {
+  if (!stored || typeof stored !== 'object' || !expected || typeof expected !== 'object') return false
+  const actual = stored as Record<string, unknown>
+  const wanted = expected as Record<string, unknown>
+  return actual.provider === wanted.provider
+    && actual.id === wanted.id
+    && actual.reasoningEffort === wanted.reasoningEffort
+}
+
 const MODEL_KEYS = ['model.provider', 'model.id', 'model.reasoningEffort'] as const
 
 /** Every field the card edits, in display order. */
@@ -608,7 +618,10 @@ export class OmCardController {
     }
     for (const write of writes) {
       const stored = readPath(user, write.field)
-      if (JSON.stringify(stored) === JSON.stringify(write.value)) matched += 1
+      const matches = write.field === 'model'
+        ? sameModelRoute(stored, write.value)
+        : JSON.stringify(stored) === JSON.stringify(write.value)
+      if (matches) matched += 1
     }
     const landed = matched === clears.length + writes.length
     if (landed) this.staged.clear()

@@ -278,6 +278,35 @@ describe('OmCardController', () => {
     expect((scope.getSnapshot().user as Record<string, unknown>).model).toBeUndefined()
   })
 
+  it('accepts a saved model route even when the Host reorders its keys', async () => {
+    const base = fakeScope({})
+    const scope: SettingsScopeLike = {
+      ...base,
+      set: async (field, value) => {
+        if (field === 'model' && value && typeof value === 'object') {
+          const model = value as { provider: string; id: string; reasoningEffort?: string }
+          return base.set(field, {
+            reasoningEffort: model.reasoningEffort,
+            id: model.id,
+            provider: model.provider,
+          })
+        }
+        return base.set(field, value)
+      },
+    }
+    const { face, state } = makeController(scope)
+    face.edit('model.provider', 'openai')
+    face.edit('model.id', 'gpt-5')
+    face.edit('model.reasoningEffort', 'high')
+    face.save()
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(state().failed).toBe(false)
+    expect(state().dirty).toBe(false)
+    expect(scope.getSnapshot().user).toEqual({
+      model: { reasoningEffort: 'high', id: 'gpt-5', provider: 'openai' },
+    })
+  })
+
   it('reset stages a clear that removes the user-layer override', async () => {
     const scope = fakeScope({ user: { observeAfterTokens: 5000 } })
     const { face, state } = makeController(scope)
