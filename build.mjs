@@ -65,7 +65,7 @@ export const bundlePurityPlugin = {
  * minifies the sheet, the module exports the hashed class map, and factory
  * execution injects one tagged <style> (idempotent across HMR reloads).
  */
-const cssModulesPlugin = {
+export const cssModulesPlugin = {
   name: 'dsh-css-modules',
   setup(pluginBuild) {
     pluginBuild.onLoad({ filter: /\.module\.css$/ }, async (args) => {
@@ -77,7 +77,12 @@ const cssModulesPlugin = {
         minify: true,
       })
       const classMap = {}
-      for (const [local, entry] of Object.entries(cssExports ?? {})) classMap[local] = entry.name
+      for (const [local, entry] of Object.entries(cssExports ?? {})) {
+        // `composes` carries the hashed names of the referenced local/global
+        // classes. Dropping them leaves the CSS intact but removes the base
+        // class from the React className (e.g. tagInline loses tag chrome).
+        classMap[local] = [entry.name, ...(entry.composes ?? []).map(composed => composed.name)].join(' ')
+      }
       const tagId = `${ID}/${basename(args.path)}`
       return {
         loader: 'js',

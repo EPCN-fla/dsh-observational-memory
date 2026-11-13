@@ -5,9 +5,10 @@
  * and global CSS must fail instead of producing an unserved client.css.
  * Plain JS (not typechecked) so it can import build.mjs directly.
  */
+import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { build } from 'esbuild'
-import { bundlePurityPlugin, PLATFORM_EXTERNALS } from '../build.mjs'
+import { bundlePurityPlugin, cssModulesPlugin, PLATFORM_EXTERNALS } from '../build.mjs'
 
 async function tryBuild(contents) {
   try {
@@ -53,5 +54,22 @@ describe('bundle purity gate', () => {
     const result = await tryBuild("import './plain.css'\nexport {}\n")
     expect(result.ok).toBe(false)
     expect(result.error).toContain('global CSS')
+  })
+})
+
+describe('CSS Modules build mapping', () => {
+  it('keeps composed base classes in the exported class name', async () => {
+    let loadCss
+    cssModulesPlugin.setup({
+      onLoad: (_options, callback) => { loadCss = callback },
+    })
+    expect(loadCss).toBeTypeOf('function')
+    const result = await loadCss({ path: resolve('src/client/card.module.css') })
+    const line = result.contents.split('\n').find(line => line.startsWith('export default '))
+    const classMap = JSON.parse(line.slice('export default '.length, -1))
+    const inline = classMap.tagInline.split(' ')
+    expect(inline).toHaveLength(2)
+    expect(inline[0]).toMatch(/_tagInline$/)
+    expect(inline).toContain(classMap.tag)
   })
 })
