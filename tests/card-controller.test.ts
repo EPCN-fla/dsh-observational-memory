@@ -611,4 +611,28 @@ describe('OmCardController disposal', () => {
     controller.dispose()
     await expect(scope.set('passive', true)).resolves.toBeUndefined()
   })
+
+  it('invalidates in-flight catalog work and rejects retries after disposal', async () => {
+    let release!: (value: unknown) => void
+    const gate = new Promise((resolve) => { release = resolve })
+    let calls = 0
+    const rpc: CatalogRpcLike = {
+      call: () => {
+        calls += 1
+        return gate as never
+      },
+    }
+    const { controller, face } = makeControllerWithRpc(fakeScope({}), rpc)
+    let publications = 0
+    face.hooks.omCard.subscribe(() => { publications += 1 })
+    controller.dispose()
+    face.retryCatalog()
+    expect(calls).toBe(1)
+
+    release({ ok: true, value: CATALOG })
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(publications).toBe(0)
+    expect(calls).toBe(1)
+  })
 })

@@ -332,6 +332,7 @@ export class OmCardController {
   private catalog: readonly ModelCatalogGroup[] = []
   /** Bumps on every issued catalog request so a late response never wins. */
   private catalogGeneration = 0
+  private disposed = false
   private readonly store: SnapshotStoreLike<OmCardState>
   private readonly unsubscribeScope: () => void
 
@@ -354,6 +355,9 @@ export class OmCardController {
    * into it on every unload/HMR; the plugin's ctx.effect calls this.
    */
   dispose(): void {
+    if (this.disposed) return
+    this.disposed = true
+    this.catalogGeneration += 1
     this.unsubscribeScope()
   }
 
@@ -400,7 +404,7 @@ export class OmCardController {
   }
 
   private async loadCatalog(): Promise<void> {
-    if (this.rpc === undefined || this.catalogStatus === 'loading') return
+    if (this.disposed || this.rpc === undefined || this.catalogStatus === 'loading') return
     const generation = ++this.catalogGeneration
     this.catalogStatus = 'loading'
     this.publish()
