@@ -14,7 +14,11 @@ import { describe, expect, it } from 'vitest'
 
 const manifest = JSON.parse(
   readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'package.json'), 'utf8'),
-) as { peerDependencies: Record<string, string>; devDependencies: Record<string, string> }
+) as {
+  peerDependencies: Record<string, string>
+  devDependencies: Record<string, string>
+  dependencies?: Record<string, string>
+}
 
 /** The host's own predicate (plugin-compatibility.ts). */
 const admits = (hostVersion: string, range: string): boolean =>
@@ -38,6 +42,15 @@ const dshPeers = Object.entries(manifest.peerDependencies).filter(([name]) =>
 )
 
 describe('DSH peer ranges', () => {
+  it('shares host-owned runtime packages instead of installing private copies', () => {
+    for (const name of ['@deepseek-ai/cordis', '@deepseek-ai/schemastery']) {
+      expect(manifest.dependencies ?? {}).not.toHaveProperty(name)
+      expect(manifest.peerDependencies[name]).toBeDefined()
+    }
+    expect(manifest.peerDependencies['@deepseek-ai/schemastery']).toBe('^3.19.0')
+    expect(manifest.devDependencies['@deepseek-ai/schemastery']).toBe('3.19.0')
+  })
+
   it('declares a peer range for every consumed host package', () => {
     expect(dshPeers.map(([name]) => name).sort()).toEqual([
       '@deepseek-ai/dsh-agent',
