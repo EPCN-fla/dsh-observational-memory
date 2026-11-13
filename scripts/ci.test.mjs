@@ -77,8 +77,8 @@ test('the exact DSH target enforces its Node 24.9 floor', () => fixture(root => 
   assert.throws(() => readCompatibility(join(root, 'package.json')))
 }))
 
-test('the compatibility matrix contains only the exact supported host', () => {
-  assert.deepEqual(Object.keys(manifest.dshCompatibility), ['0.2.2-rc.2'])
+test('the compatibility matrix contains only the exact supported hosts', () => {
+  assert.deepEqual(Object.keys(manifest.dshCompatibility), ['0.2.2-rc.2', '0.2.2-rc.3'])
 })
 
 test('every executable matrix version remains inside every DSH peer range', () => {
