@@ -33,7 +33,7 @@ import { registerRecallTool } from './tools/recall.ts'
 export const name = 'observational-memory'
 export const inject = ['llm', 'tools', 'sessions', 'agents']
 
-export { Config, SETTINGS_NAMESPACE }
+export { Config }
 export type { Config as ConfigShape } from './config.ts'
 
 /**

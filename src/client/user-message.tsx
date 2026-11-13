@@ -313,7 +313,7 @@ export const OmUserMessageNodeView = memo(function OmUserMessageNodeView(
   const [rollbackPending, setRollbackPending] = useState(false)
   const rollbackInFlight = useRef(false)
   const mounted = useRef(true)
-  useEffect(() => () => { mounted.current = false }, [])
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
 
   // text to restore, no attachments, and a completed earlier
   // turn to fork from (a turn-0 message has no rollback point).

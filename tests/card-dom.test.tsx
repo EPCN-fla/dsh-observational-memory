@@ -10,6 +10,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { ObservationalMemoryCard } from '../src/client/card.tsx'
+import css from '../src/client/card.module.css'
 import {
   CARD_FIELDS,
   OmCardController,
@@ -169,9 +170,20 @@ describe('ObservationalMemoryCard threshold display', () => {
   it('shows only the calibrated threshold in calibrated mode', async () => {
     mount(fakeScope({}))
     await flush()
+    expect(container.firstElementChild?.tagName).toBe('LI')
     expand()
     expect(container.querySelector('#om-compactAfterTokens')).not.toBeNull()
     expect(container.querySelector('#om-compactAfterTokensRatio')).toBeNull()
+  })
+
+  it('keeps boolean reset controls outside the checkbox label', async () => {
+    mount(fakeScope({ user: { passive: true } }))
+    await flush()
+    expand()
+    const label = container.querySelector('label[for="om-passive"]')
+    expect(label?.querySelector('button')).toBeNull()
+    expect(label?.textContent).not.toContain(en['action.reset'])
+    expect(label?.parentElement?.querySelector('button')).not.toBeNull()
   })
 
   it('shows only the ratio threshold in ratio mode', async () => {
@@ -181,6 +193,32 @@ describe('ObservationalMemoryCard threshold display', () => {
     expand()
     expect(container.querySelector('#om-compactAfterTokens')).toBeNull()
     expect(container.querySelector('#om-compactAfterTokensRatio')).not.toBeNull()
+  })
+
+  it('resets the mode to its visible default and unlocks a hidden invalid draft', async () => {
+    const scope = fakeScope({ user: { compactAfterTokensMode: 'ratio' } })
+    mount(scope)
+    await flush()
+    expand()
+
+    const input = container.querySelector<HTMLInputElement>('#om-compactAfterTokensRatio')!
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
+    act(() => {
+      setter.call(input, 'not-a-number')
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    const mode = select('om-compactAfterTokensMode')!
+    const reset = mode.parentElement?.querySelector<HTMLButtonElement>('button')
+    expect(reset).not.toBeNull()
+    act(() => reset!.click())
+
+    expect(select('om-compactAfterTokensMode')?.value).toBe('calibrated')
+    expect(container.querySelector('#om-compactAfterTokens')).not.toBeNull()
+    expect(container.querySelector('#om-compactAfterTokensRatio')).toBeNull()
+    const saveButton = [...container.querySelectorAll<HTMLButtonElement>('button')].find((el) => el.textContent === en['action.save'])
+    expect(saveButton?.disabled).toBe(false)
+    await save()
+    expect(scope.getSnapshot().user).toEqual({})
   })
 
   it('switches the displayed threshold with the mode draft and never writes the hidden one', async () => {
@@ -301,16 +339,42 @@ describe('ObservationalMemoryBundleConfig (DSH ≥0.1.7 bundle page entry)', () 
     await mountBundle('page')
     const header = container.querySelector<HTMLButtonElement>('button[aria-expanded]')
     expect(header?.getAttribute('aria-expanded')).toBe('false')
+    const chevron = header?.querySelector('span[aria-hidden="true"]')
+    expect(chevron?.querySelector('svg')).not.toBeNull()
+    expect(chevron?.classList.contains(css.chevron)).toBe(true)
+    expect(chevron?.classList.contains(css.chevronOpen)).toBe(false)
     expect(container.querySelector('#om-observeAfterTokens')).toBeNull()
 
     expand()
     expect(header?.getAttribute('aria-expanded')).toBe('true')
+    expect(chevron?.classList.contains(css.chevronOpen)).toBe(true)
     expect(container.querySelector('#om-observeAfterTokens')).not.toBeNull()
     expect(container.querySelector('#om-workerTimeoutMs')).not.toBeNull()
     expect(container.querySelector('#om-consolidationRetryMaxAttempts')).not.toBeNull()
     expect(container.querySelector('#om-consolidationRetryBaseDelayMs')).not.toBeNull()
     expect(container.querySelector('#om-consolidationRetryMaxDelayMs')).not.toBeNull()
     expect(container.querySelector('#om-storageDir')).not.toBeNull()
+  })
+
+  it('uses page-safe semantics and exposes disclosure and dirty state', async () => {
+    await mountBundle('page')
+    expect(container.firstElementChild?.tagName).toBe('DIV')
+    expect(container.querySelector('li')).toBeNull()
+    const header = container.querySelector<HTMLButtonElement>('button[aria-expanded]')!
+    expect(header.getAttribute('aria-controls')).toBeNull()
+
+    expand()
+    const bodyId = header.getAttribute('aria-controls')
+    expect(bodyId).not.toBeNull()
+    expect(container.querySelector(`#${CSS.escape(bodyId!)}`)).not.toBeNull()
+
+    const input = container.querySelector<HTMLInputElement>('#om-observeAfterTokens')!
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
+    act(() => {
+      setter.call(input, '10001')
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    expect(header.getAttribute('aria-label')).toContain(en['state.unsaved'])
   })
 
   it('collapses the page card after a successful save', async () => {
@@ -323,7 +387,9 @@ describe('ObservationalMemoryBundleConfig (DSH ≥0.1.7 bundle page entry)', () 
       input.dispatchEvent(new Event('input', { bubbles: true }))
     })
     await save()
-    expect(container.querySelector('button[aria-expanded]')?.getAttribute('aria-expanded')).toBe('false')
+    const header = container.querySelector('button[aria-expanded]')
+    expect(header?.getAttribute('aria-expanded')).toBe('false')
+    expect(header?.querySelector('span[aria-hidden="true"]')?.classList.contains(css.chevronOpen)).toBe(false)
     expect(container.querySelector('#om-observeAfterTokens')).toBeNull()
     expect(container.querySelector('#om-storageDir')).toBeNull()
   })

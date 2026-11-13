@@ -5,15 +5,31 @@
  * chrome and controls (the bundle-purity gate forbids importing the shipped
  * cards' components).
  */
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import type { LocaleKey } from './locales.ts'
 import type { OmCardFace, OmCardState } from './controller.ts'
 import css from './card.module.css'
 
 export type Translate = (key: LocaleKey) => string
 
+/** The official ic_ds_chevron_down_outline_14 icon (verbatim path). */
+function ChevronIcon(props: { open: boolean }) {
+  return (
+    <span className={props.open ? `${css.chevron} ${css.chevronOpen}` : css.chevron} aria-hidden="true">
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path
+          d="M11.8486 5.5L11.4238 5.92383L8.69727 8.65137C8.44157 8.90706 8.21562 9.13382 8.01172 9.29785C7.79912 9.46883 7.55595 9.61756 7.25 9.66602C7.08435 9.69222 6.91565 9.69222 6.75 9.66602C6.44405 9.61756 6.20088 9.46883 5.98828 9.29785C5.78438 9.13382 5.55843 8.90706 5.30273 8.65137L2.57617 5.92383L2.15137 5.5L3 4.65137L3.42383 5.07617L6.15137 7.80273C6.42595 8.07732 6.59876 8.24849 6.74023 8.3623C6.87291 8.46904 6.92272 8.47813 6.9375 8.48047C6.97895 8.48703 7.02105 8.48703 7.0625 8.48047C7.07728 8.47813 7.12709 8.46904 7.25977 8.3623C7.40124 8.24849 7.57405 8.07732 7.84863 7.80273L10.5762 5.07617L11 4.65137L11.8486 5.5Z"
+          fill="currentColor"
+        />
+      </svg>
+    </span>
+  )
+}
+
 /** Props the slot renderer composes for the card. */
 export interface ObservationalMemoryCardProps {
+  /** List item in the legacy settings list; a div on the plugin detail page. */
+  as?: 'li' | 'div'
   t: Translate
   /** Selector hook synthesized from the inject face's `hooks.omCard` store. */
   useOmCard: <S>(selector: (state: OmCardState) => S) => S
@@ -176,15 +192,17 @@ function ToggleField(props: {
         onChange={(event) => props.onEdit(event.target.checked)}
       />
       <div className={css.rowText}>
-        <label className={css.label} htmlFor={props.id}>
-          {props.label}
-          {props.overridden ? <span className={css.tagInline}>{props.overriddenLabel}</span> : null}
+        <div className={css.head}>
+          <label className={css.label} htmlFor={props.id}>{props.label}</label>
           {props.overridden ? (
-            <button type="button" className={css.reset} disabled={props.disabled} onClick={props.onReset}>
-              {props.resetLabel}
-            </button>
+            <span className={css.badges}>
+              <span className={css.tagInline}>{props.overriddenLabel}</span>
+              <button type="button" className={css.reset} disabled={props.disabled} onClick={props.onReset}>
+                {props.resetLabel}
+              </button>
+            </span>
           ) : null}
-        </label>
+        </div>
         <p className={css.hint}>{props.hint}</p>
       </div>
     </div>
@@ -246,6 +264,8 @@ export function ObservationalMemoryCard(props: ObservationalMemoryCardProps) {
   const { t } = props
   const state = props.useOmCard((snapshot) => snapshot)
   const [open, setOpen] = useState(false)
+  const bodyId = useId()
+  const Root = props.as ?? 'li'
   const expanded = open
   const saveRequested = useRef(false)
 
@@ -340,12 +360,13 @@ export function ObservationalMemoryCard(props: ObservationalMemoryCardProps) {
     )
 
   return (
-    <li className={`${css.card} ${expanded ? css.cardOpen : ''}`}>
+    <Root className={expanded ? `${css.card} ${css.cardOpen}` : css.card}>
       <button
         type="button"
         className={css.header}
         aria-expanded={open}
-        aria-label={`${t(open ? 'state.collapse' : 'state.expand')}: ${t('card.title')}`}
+        aria-label={`${t(open ? 'state.collapse' : 'state.expand')}: ${t('card.title')}${state.dirty ? `; ${t('state.unsaved')}` : ''}`}
+        aria-controls={open ? bodyId : undefined}
         onClick={() => setOpen(!open)}
       >
         <span className={css.headText}>
@@ -353,10 +374,10 @@ export function ObservationalMemoryCard(props: ObservationalMemoryCardProps) {
           <span className={css.description}>{t('card.description')}</span>
         </span>
         {state.dirty ? <span className={css.tag}>{t('state.unsaved')}</span> : null}
-        <span className={`${css.chevron} ${open ? css.chevronOpen : ''}`} aria-hidden="true">▾</span>
+        <ChevronIcon open={open} />
       </button>
       {expanded ? (
-        <div className={css.body}>
+        <div id={bodyId} className={css.body}>
           {!state.writable ? <p className={css.readOnly} role="status">{t('state.readOnly')}</p> : null}
 
           <h4 className={css.section}>{t('section.thresholds')}</h4>
@@ -369,7 +390,7 @@ export function ObservationalMemoryCard(props: ObservationalMemoryCardProps) {
             overriddenLabel={t('state.overridden')}
             resetLabel={t('action.reset')}
             disabled={disabled}
-            text={state.fields[MODE_FIELD.key]?.text ?? MODE_FIELD.options[0]}
+            text={thresholdMode}
             overridden={state.fields[MODE_FIELD.key]?.overridden ?? false}
             onEdit={(text) => props.edit(MODE_FIELD.key, text)}
             onReset={() => props.resetField(MODE_FIELD.key)}
@@ -469,7 +490,7 @@ export function ObservationalMemoryCard(props: ObservationalMemoryCardProps) {
           </div>
         </div>
       ) : null}
-    </li>
+    </Root>
   )
 }
 
@@ -482,5 +503,5 @@ export function ObservationalMemoryCard(props: ObservationalMemoryCardProps) {
  */
 export function ObservationalMemoryBundleConfig(props: ObservationalMemoryCardProps & { view: 'summary' | 'page' }) {
   if (props.view === 'summary') return <>{props.t('card.description')}</>
-  return <ObservationalMemoryCard {...props} />
+  return <ObservationalMemoryCard {...props} as="div" />
 }

@@ -29,7 +29,10 @@ export async function writeClipboardText(text: string): Promise<boolean> {
   const area = document.createElement('textarea')
   try {
     area.value = text
+    area.readOnly = true
     area.style.position = 'fixed'
+    area.style.left = '-9999px'
+    area.style.top = '0'
     area.style.opacity = '0'
     document.body.appendChild(area)
     area.select()

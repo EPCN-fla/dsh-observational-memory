@@ -10,7 +10,9 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Context } from '@deepseek-ai/cordis'
 import { PlainConfig } from '../src/config.ts'
-import { apply } from '../src/index.ts'
+import * as entry from '../src/index.ts'
+
+const { apply } = entry
 
 let dir: string
 
@@ -69,6 +71,10 @@ function fakeCtx(settings: unknown): { ctx: Context; wiring: Wiring } {
 }
 
 describe('apply settings wiring', () => {
+  it('exports only the Loader-owned runtime entry values', () => {
+    expect(Object.keys(entry).sort()).toEqual(['Config', 'apply', 'inject', 'name'])
+  })
+
   it('binds the legacy settings section on hosts that serve installSection (DSH ≤0.1.5)', () => {
     const { ctx, wiring } = fakeCtx({ installSection: () => {}, configure: undefined })
     expect(() => apply(ctx, { storageDir: dir })).not.toThrow()

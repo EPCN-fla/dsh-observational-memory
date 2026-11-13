@@ -278,6 +278,35 @@ describe('OmCardController', () => {
     expect((scope.getSnapshot().user as Record<string, unknown>).model).toBeUndefined()
   })
 
+  it('accepts a saved model route even when the Host reorders its keys', async () => {
+    const base = fakeScope({})
+    const scope: SettingsScopeLike = {
+      ...base,
+      set: async (field, value) => {
+        if (field === 'model' && value && typeof value === 'object') {
+          const model = value as { provider: string; id: string; reasoningEffort?: string }
+          return base.set(field, {
+            reasoningEffort: model.reasoningEffort,
+            id: model.id,
+            provider: model.provider,
+          })
+        }
+        return base.set(field, value)
+      },
+    }
+    const { face, state } = makeController(scope)
+    face.edit('model.provider', 'openai')
+    face.edit('model.id', 'gpt-5')
+    face.edit('model.reasoningEffort', 'high')
+    face.save()
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(state().failed).toBe(false)
+    expect(state().dirty).toBe(false)
+    expect(scope.getSnapshot().user).toEqual({
+      model: { reasoningEffort: 'high', id: 'gpt-5', provider: 'openai' },
+    })
+  })
+
   it('reset stages a clear that removes the user-layer override', async () => {
     const scope = fakeScope({ user: { observeAfterTokens: 5000 } })
     const { face, state } = makeController(scope)
@@ -312,6 +341,22 @@ describe('OmCardController', () => {
     const user = scope.getSnapshot().user as Record<string, unknown>
     expect(user.compactAfterTokensMode).toBe('ratio')
     expect(user.compactAfterTokens).toBeUndefined()
+  })
+
+  it('drops a hidden invalid threshold draft when resetting the mode', async () => {
+    const scope = fakeScope({ user: { compactAfterTokensMode: 'ratio' } })
+    const { face, state } = makeController(scope)
+    face.edit('compactAfterTokensRatio', 'not-a-number')
+    expect(state().invalid).toBe(true)
+
+    face.resetField('compactAfterTokensMode')
+    expect(state().invalid).toBe(false)
+    expect(state().fields.compactAfterTokensRatio.text).toBe('')
+    face.save()
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(state().failed).toBe(false)
+    expect(state().dirty).toBe(false)
+    expect(scope.getSnapshot().user).toEqual({})
   })
 
   it('never writes a staged draft of the threshold field the current mode hides', async () => {
@@ -565,5 +610,29 @@ describe('OmCardController disposal', () => {
     // A second dispose is safe, and no error surfaces from a post-dispose write.
     controller.dispose()
     await expect(scope.set('passive', true)).resolves.toBeUndefined()
+  })
+
+  it('invalidates in-flight catalog work and rejects retries after disposal', async () => {
+    let release!: (value: unknown) => void
+    const gate = new Promise((resolve) => { release = resolve })
+    let calls = 0
+    const rpc: CatalogRpcLike = {
+      call: () => {
+        calls += 1
+        return gate as never
+      },
+    }
+    const { controller, face } = makeControllerWithRpc(fakeScope({}), rpc)
+    let publications = 0
+    face.hooks.omCard.subscribe(() => { publications += 1 })
+    controller.dispose()
+    face.retryCatalog()
+    expect(calls).toBe(1)
+
+    release({ ok: true, value: CATALOG })
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(publications).toBe(0)
+    expect(calls).toBe(1)
   })
 })

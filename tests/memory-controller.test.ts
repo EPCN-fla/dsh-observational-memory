@@ -62,9 +62,50 @@ describe('OmMemoryController', () => {
     })
     const controller = new OmMemoryController(rpc, 'session-1')
     await controller.setViewMode('full')
+    expect(controller.getSnapshot().phase).toBe('ready')
     expect(controller.getSnapshot().viewMode).toBe('full')
     expect(controller.getSnapshot().viewText).toBe('VIEW:full')
     expect(rpc.calls).toEqual(['observationalMemory/view'])
+  })
+
+  it('leaves the loading phase when a mode switch supersedes the initial refresh', async () => {
+    let releaseInitial!: () => void
+    const initialGate = new Promise<void>((resolve) => { releaseInitial = resolve })
+    const rpc: ConnectionRpcLike = {
+      async call(_channel, endpoint, payload) {
+        const request = (payload as { args: { request: Record<string, unknown> } }).args.request
+        if (endpoint === 'observationalMemory/view' && request.mode === 'full') {
+          return { ok: true, value: { text: 'VIEW:full' } }
+        }
+        await initialGate
+        return {
+          ok: true,
+          value: endpoint === 'observationalMemory/logs'
+            ? { enabled: true, text: 'LOGS:initial' }
+            : { text: `INITIAL:${endpoint}` },
+        }
+      },
+    }
+    const controller = new OmMemoryController(rpc, 'session-1')
+    const initialRefresh = controller.refresh()
+    await controller.setViewMode('full')
+
+    expect(controller.getSnapshot()).toMatchObject({
+      phase: 'ready',
+      viewMode: 'full',
+      viewText: 'VIEW:full',
+      refreshing: false,
+    })
+    releaseInitial()
+    await initialRefresh
+    // The superseded refresh must not overwrite the newer view or re-open
+    // the loading/refreshing state after its late response arrives.
+    expect(controller.getSnapshot()).toMatchObject({
+      phase: 'ready',
+      viewMode: 'full',
+      viewText: 'VIEW:full',
+      refreshing: false,
+    })
   })
 
   it('keeps the previous mode label over its content until the new scope lands', async () => {

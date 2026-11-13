@@ -61,6 +61,7 @@ The correspondence matrix between plugin versions and DSH versions is as follows
 
 | Plugin version | Minimum compatible DSH version | Highest compatible DSH version |
 | --- | --- | --- |
+| 0.5.1 | 0.2.2-rc.2 | 0.2.2-rc.3 |
 | 0.5.0 | 0.2.2-rc.2 | 0.2.2-rc.2 |
 | 0.4.4 | 0.1.5-rc.2 | 0.2.2-rc.1 |
 | 0.4.3 | 0.1.5-rc.2 | 0.2.1-rc.5 |
@@ -73,7 +74,7 @@ The correspondence matrix between plugin versions and DSH versions is as follows
 | 0.1.3 | 0.1.5-rc.2 | 0.1.5-rc.2 |
 | 0.1.2 | 0.1.5-rc.2 | 0.1.5-rc.2 |
 
-Starting with `0.5.0`, this plugin supports only DSH `0.2.2-rc.2`: every DSH peer is pinned to that exact version, and other RCs or final releases are outside this release’s support boundary. It requires Node.js 24 at `24.9.0` or later (`>=24.9.0 <25`), matching DSH’s official Node 24.9 minimum while deliberately excluding other Node majors.
+Plugin `0.5.1` supports DSH `0.2.2-rc.2` and `0.2.2-rc.3`: every DSH peer is restricted to those two exact versions, and other RCs or final releases are outside this release’s support boundary. Plugin `0.5.0` supports only DSH `0.2.2-rc.2`. It requires Node.js 24 at `24.9.0` or later (`>=24.9.0 <25`), matching DSH’s official Node 24.9 minimum while deliberately excluding other Node majors.
 
 Add the plugin to a profile through the DSH CLI (`web` shown here; substitute as needed). The package ships a `cordis.patch.yml`, so the composer mounts the host half automatically and serves `/plugins/dsh-observational-memory/client.js` to the Web client — no extra composition wiring.
 

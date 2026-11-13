@@ -1,4 +1,4 @@
-# Branch pushes do not run CI. PR: one Node 24 job for the exact supported DSH.
+# Branch pushes do not run CI. PR: one Node 24 job per exact supported DSH.
 # v* tags: independent release job with the full local gate; no matrix/uploads.
 name: ci
 
@@ -21,7 +21,7 @@ concurrency:
 
 jobs:
   compatibility:
-    name: Read supported DSH version
+    name: Read supported DSH versions
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 5

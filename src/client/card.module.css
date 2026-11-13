@@ -61,6 +61,7 @@
 
 .chevron {
   flex: none;
+  display: inline-flex;
   color: var(--dsw-alias-label-tertiary);
   transition: transform 0.16s;
 }
@@ -84,7 +85,6 @@
 
 .tagInline {
   composes: tag;
-  margin-left: 8px;
 }
 
 .body {
@@ -192,8 +192,13 @@
   color: var(--dsw-alias-label-primary);
 }
 
+.input:focus-visible,
+.inputInvalid:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: 1px;
+}
+
 .input:focus-visible {
-  outline: none;
   border-color: var(--dsw-alias-brand-primary);
 }
 
@@ -312,4 +317,11 @@
 .save:disabled {
   cursor: default;
   opacity: 0.5;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card,
+  .chevron {
+    transition: none;
+  }
 }

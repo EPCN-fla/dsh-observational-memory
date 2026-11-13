@@ -197,7 +197,7 @@ export class OmMemoryController {
     const view = await this.attempt(this.fetch('observationalMemory/view', { sessionId: this.sessionId, mode }, isTextResult))
     if (generation !== this.generation) return
     this.publish(view.ok
-      ? { ...this.current, viewMode: mode, viewText: view.value.text, error: undefined, failedAction: undefined, refreshing: false }
-      : { ...this.current, error: view.message, failedAction: 'refresh', refreshing: false })
+      ? { ...this.current, phase: 'ready', viewMode: mode, viewText: view.value.text, error: undefined, failedAction: undefined, refreshing: false }
+      : { ...this.current, phase: this.current.phase === 'loading' ? 'error' : this.current.phase, error: view.message, failedAction: 'refresh', refreshing: false })
   }
 }
