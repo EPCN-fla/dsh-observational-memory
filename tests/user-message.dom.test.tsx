@@ -6,7 +6,7 @@
  * imports only the in-repo shell build provides.
  */
 import { act } from 'react'
-import { createElement, type ReactNode } from 'react'
+import { createElement, StrictMode, type ReactNode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -60,6 +60,7 @@ function mount(options: {
   turn?: number
   content?: readonly unknown[]
   injected: Partial<RollbackInjected>
+  strict?: boolean
   renderFactorySlot?: (name: string, props: Record<string, unknown>, options?: { fallback?: ReactNode }) => ReactNode
 }) {
   const injected: RollbackInjected = {
@@ -68,28 +69,27 @@ function mount(options: {
     notifyRollbackBlocked: () => {},
     ...options.injected,
   }
+  const view = createElement(OmUserMessageNodeView, {
+    node: {
+      // Deliberately different from data.seq: the click must use the
+      // durable event seq, not the flow-ordering anchorSeq.
+      anchorSeq: options.anchorSeq ?? options.dataSeq + 1000,
+      location: { kind: 'turn', turn: { turn: options.turn ?? 2 } },
+      data: {
+        seq: options.dataSeq,
+        time: Date.parse('2026-01-15T14:30:00'),
+        content: options.content ?? [{ type: 'text', text: 'restore me' }],
+      },
+    },
+    renderMessageImages: ({ images }: { images: unknown[] }) => createElement('span', { 'data-images': images.length }, 'image preview'),
+    renderFactorySlot: options.renderFactorySlot,
+    openFile: () => {},
+    openSkill: () => {},
+    t,
+    ...injected,
+  } as never)
   act(() => {
-    root.render(
-      createElement(OmUserMessageNodeView, {
-        node: {
-          // Deliberately different from data.seq: the click must use the
-          // durable event seq, not the flow-ordering anchorSeq.
-          anchorSeq: options.anchorSeq ?? options.dataSeq + 1000,
-          location: { kind: 'turn', turn: { turn: options.turn ?? 2 } },
-          data: {
-            seq: options.dataSeq,
-            time: Date.parse('2026-01-15T14:30:00'),
-            content: options.content ?? [{ type: 'text', text: 'restore me' }],
-          },
-        },
-        renderMessageImages: ({ images }: { images: unknown[] }) => createElement('span', { 'data-images': images.length }, 'image preview'),
-        renderFactorySlot: options.renderFactorySlot,
-        openFile: () => {},
-        openSkill: () => {},
-        t,
-        ...injected,
-      } as never),
-    )
+    root.render(options.strict === true ? createElement(StrictMode, null, view) : view)
   })
 }
 
@@ -205,5 +205,29 @@ describe('OmUserMessageNodeView rollback click', () => {
     expect(rollbackButton().getAttribute('aria-disabled')).toBe('true')
     act(() => { rollbackButton().click() })
     expect(calls).toEqual([])
+  })
+})
+
+describe('OmUserMessageNodeView StrictMode', () => {
+  it('resets rollback pending after the effect replay', async () => {
+    let settle!: () => void
+    const rollback = vi.fn(() => new Promise<void>(resolve => { settle = resolve }))
+    mount({
+      dataSeq: 11,
+      strict: true,
+      injected: {
+        rollback,
+        rollbackWindow: () => ({ entries: [{ seq: 3, type: 'turn/end' }], hasMore: false }),
+      },
+    })
+
+    act(() => { rollbackButton().click() })
+    expect(rollback).toHaveBeenCalledTimes(1)
+    expect(rollbackButton().getAttribute('aria-disabled')).toBe('true')
+    await act(async () => {
+      settle()
+      await Promise.resolve()
+    })
+    expect(rollbackButton().getAttribute('aria-disabled')).toBeNull()
   })
 })
