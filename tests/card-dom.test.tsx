@@ -170,9 +170,20 @@ describe('ObservationalMemoryCard threshold display', () => {
   it('shows only the calibrated threshold in calibrated mode', async () => {
     mount(fakeScope({}))
     await flush()
+    expect(container.firstElementChild?.tagName).toBe('LI')
     expand()
     expect(container.querySelector('#om-compactAfterTokens')).not.toBeNull()
     expect(container.querySelector('#om-compactAfterTokensRatio')).toBeNull()
+  })
+
+  it('keeps boolean reset controls outside the checkbox label', async () => {
+    mount(fakeScope({ user: { passive: true } }))
+    await flush()
+    expand()
+    const label = container.querySelector('label[for="om-passive"]')
+    expect(label?.querySelector('button')).toBeNull()
+    expect(label?.textContent).not.toContain(en['action.reset'])
+    expect(label?.parentElement?.querySelector('button')).not.toBeNull()
   })
 
   it('shows only the ratio threshold in ratio mode', async () => {
@@ -343,6 +354,27 @@ describe('ObservationalMemoryBundleConfig (DSH ≥0.1.7 bundle page entry)', () 
     expect(container.querySelector('#om-consolidationRetryBaseDelayMs')).not.toBeNull()
     expect(container.querySelector('#om-consolidationRetryMaxDelayMs')).not.toBeNull()
     expect(container.querySelector('#om-storageDir')).not.toBeNull()
+  })
+
+  it('uses page-safe semantics and exposes disclosure and dirty state', async () => {
+    await mountBundle('page')
+    expect(container.firstElementChild?.tagName).toBe('DIV')
+    expect(container.querySelector('li')).toBeNull()
+    const header = container.querySelector<HTMLButtonElement>('button[aria-expanded]')!
+    expect(header.getAttribute('aria-controls')).toBeNull()
+
+    expand()
+    const bodyId = header.getAttribute('aria-controls')
+    expect(bodyId).not.toBeNull()
+    expect(container.querySelector(`#${CSS.escape(bodyId!)}`)).not.toBeNull()
+
+    const input = container.querySelector<HTMLInputElement>('#om-observeAfterTokens')!
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
+    act(() => {
+      setter.call(input, '10001')
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    expect(header.getAttribute('aria-label')).toContain(en['state.unsaved'])
   })
 
   it('collapses the page card after a successful save', async () => {
