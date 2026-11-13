@@ -10,6 +10,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { ObservationalMemoryCard } from '../src/client/card.tsx'
+import css from '../src/client/card.module.css'
 import {
   CARD_FIELDS,
   OmCardController,
@@ -301,10 +302,15 @@ describe('ObservationalMemoryBundleConfig (DSH ≥0.1.7 bundle page entry)', () 
     await mountBundle('page')
     const header = container.querySelector<HTMLButtonElement>('button[aria-expanded]')
     expect(header?.getAttribute('aria-expanded')).toBe('false')
+    const chevron = header?.querySelector('span[aria-hidden="true"]')
+    expect(chevron?.querySelector('svg')).not.toBeNull()
+    expect(chevron?.classList.contains(css.chevron)).toBe(true)
+    expect(chevron?.classList.contains(css.chevronOpen)).toBe(false)
     expect(container.querySelector('#om-observeAfterTokens')).toBeNull()
 
     expand()
     expect(header?.getAttribute('aria-expanded')).toBe('true')
+    expect(chevron?.classList.contains(css.chevronOpen)).toBe(true)
     expect(container.querySelector('#om-observeAfterTokens')).not.toBeNull()
     expect(container.querySelector('#om-workerTimeoutMs')).not.toBeNull()
     expect(container.querySelector('#om-consolidationRetryMaxAttempts')).not.toBeNull()
@@ -323,7 +329,9 @@ describe('ObservationalMemoryBundleConfig (DSH ≥0.1.7 bundle page entry)', () 
       input.dispatchEvent(new Event('input', { bubbles: true }))
     })
     await save()
-    expect(container.querySelector('button[aria-expanded]')?.getAttribute('aria-expanded')).toBe('false')
+    const header = container.querySelector('button[aria-expanded]')
+    expect(header?.getAttribute('aria-expanded')).toBe('false')
+    expect(header?.querySelector('span[aria-hidden="true"]')?.classList.contains(css.chevronOpen)).toBe(false)
     expect(container.querySelector('#om-observeAfterTokens')).toBeNull()
     expect(container.querySelector('#om-storageDir')).toBeNull()
   })

@@ -61,6 +61,7 @@
 
 .chevron {
   flex: none;
+  display: inline-flex;
   color: var(--dsw-alias-label-tertiary);
   transition: transform 0.16s;
 }
