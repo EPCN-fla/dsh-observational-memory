@@ -184,6 +184,32 @@ describe('ObservationalMemoryCard threshold display', () => {
     expect(container.querySelector('#om-compactAfterTokensRatio')).not.toBeNull()
   })
 
+  it('resets the mode to its visible default and unlocks a hidden invalid draft', async () => {
+    const scope = fakeScope({ user: { compactAfterTokensMode: 'ratio' } })
+    mount(scope)
+    await flush()
+    expand()
+
+    const input = container.querySelector<HTMLInputElement>('#om-compactAfterTokensRatio')!
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
+    act(() => {
+      setter.call(input, 'not-a-number')
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    const mode = select('om-compactAfterTokensMode')!
+    const reset = mode.parentElement?.querySelector<HTMLButtonElement>('button')
+    expect(reset).not.toBeNull()
+    act(() => reset!.click())
+
+    expect(select('om-compactAfterTokensMode')?.value).toBe('calibrated')
+    expect(container.querySelector('#om-compactAfterTokens')).not.toBeNull()
+    expect(container.querySelector('#om-compactAfterTokensRatio')).toBeNull()
+    const saveButton = [...container.querySelectorAll<HTMLButtonElement>('button')].find((el) => el.textContent === en['action.save'])
+    expect(saveButton?.disabled).toBe(false)
+    await save()
+    expect(scope.getSnapshot().user).toEqual({})
+  })
+
   it('switches the displayed threshold with the mode draft and never writes the hidden one', async () => {
     const scope = fakeScope({})
     mount(scope)

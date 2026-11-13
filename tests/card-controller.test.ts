@@ -314,6 +314,22 @@ describe('OmCardController', () => {
     expect(user.compactAfterTokens).toBeUndefined()
   })
 
+  it('drops a hidden invalid threshold draft when resetting the mode', async () => {
+    const scope = fakeScope({ user: { compactAfterTokensMode: 'ratio' } })
+    const { face, state } = makeController(scope)
+    face.edit('compactAfterTokensRatio', 'not-a-number')
+    expect(state().invalid).toBe(true)
+
+    face.resetField('compactAfterTokensMode')
+    expect(state().invalid).toBe(false)
+    expect(state().fields.compactAfterTokensRatio.text).toBe('')
+    face.save()
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(state().failed).toBe(false)
+    expect(state().dirty).toBe(false)
+    expect(scope.getSnapshot().user).toEqual({})
+  })
+
   it('never writes a staged draft of the threshold field the current mode hides', async () => {
     // Calibrated mode is in effect; a compactAfterTokensRatio draft staged
     // against it (e.g. pasted state) must not be written.

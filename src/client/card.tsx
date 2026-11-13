@@ -383,7 +383,7 @@ export function ObservationalMemoryCard(props: ObservationalMemoryCardProps) {
             overriddenLabel={t('state.overridden')}
             resetLabel={t('action.reset')}
             disabled={disabled}
-            text={state.fields[MODE_FIELD.key]?.text ?? MODE_FIELD.options[0]}
+            text={thresholdMode}
             overridden={state.fields[MODE_FIELD.key]?.overridden ?? false}
             onEdit={(text) => props.edit(MODE_FIELD.key, text)}
             onReset={() => props.resetField(MODE_FIELD.key)}

@@ -376,9 +376,7 @@ export class OmCardController {
    */
   private editField(field: string, text: string): void {
     this.staged.set(field, { text, clear: false })
-    if (field === 'compactAfterTokensMode') {
-      this.staged.delete(text === 'ratio' ? 'compactAfterTokens' : 'compactAfterTokensRatio')
-    }
+    if (field === 'compactAfterTokensMode') this.staged.delete(this.hiddenThresholdField())
     if (field === 'model.provider') {
       this.staged.set('model.id', { text: '', clear: false })
       this.staged.set('model.reasoningEffort', { text: '', clear: false })
@@ -496,6 +494,9 @@ export class OmCardController {
     // Staging an unchanged-at-clear value is still staged: the reset badge
     // previews the save rather than reporting stored state.
     this.staged.set(key, edit)
+    // Reset is a mode change too: drop the draft hidden by the base-layer
+    // mode, otherwise an invisible invalid ratio/threshold can block Save.
+    if (key === 'compactAfterTokensMode') this.staged.delete(this.hiddenThresholdField())
     this.failed = false
     this.partial = false
     this.publish()
