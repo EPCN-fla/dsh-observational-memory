@@ -30,4 +30,24 @@ describe('runWorkerLoop finish robustness', () => {
     expect(result.turns).toBe(2)
     expect(JSON.stringify(requests[1].messages)).toContain('echo: hi')
   })
+
+  it('routes CONTENT_REFUSED through the generic terminal error path', async () => {
+    const { ctx, callCount } = fakeLlmCtx([{
+      finish: 'error',
+      failure: { code: 'CONTENT_REFUSED', message: 'provider refused the request' },
+    }])
+    await expect(runWorkerLoop(ctx, {
+      provider: 'p',
+      model: 'm',
+      system: 's',
+      userText: 'u',
+      tools: [echoTool],
+      maxTurns: 4,
+    })).rejects.toMatchObject({
+      name: 'WorkerStreamError',
+      finishKind: 'error',
+      message: 'worker stream ended with finish kind "error": provider refused the request',
+    })
+    expect(callCount()).toBe(1)
+  })
 })

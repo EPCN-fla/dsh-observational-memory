@@ -1,10 +1,11 @@
 /**
- * Exact-host regression guard for the intentionally narrow DSH 0.5.x release line.
+ * Host-compatibility regression guard for the intentionally narrow DSH 0.5.x release line.
  *
  * The host enforces each plugin's `peerDependencies` at install and startup
  * with `semver.satisfies(runtimeVersion, range, { includePrerelease: true })`.
- * This release supports only DSH 0.2.2-rc.2 and 0.2.2-rc.3: other release
- * candidates and final releases must be refused until explicitly audited and admitted.
+ * Every DSH peer covers the 0.2.2 release-candidate corridor from rc.2 up to,
+ * but not including, the final release. The compatibility matrix records the
+ * exact hosts audited by this release; later 0.2.2 RCs remain admissible by design.
  */
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -24,7 +25,8 @@ const manifest = JSON.parse(
 const admits = (hostVersion: string, range: string): boolean =>
   semver.satisfies(hostVersion, range, { includePrerelease: true })
 
-const SUPPORTED_HOSTS = ['0.2.2-rc.2', '0.2.2-rc.3'] as const
+const PEER_RANGE = '>=0.2.2-rc.2 <0.2.2'
+const SUPPORTED_HOSTS = ['0.2.2-rc.2', '0.2.2-rc.3', '0.2.2-rc.4', '0.2.2-rc.5'] as const
 const REFUSED_HOSTS = [
   '0.1.5-rc.2',
   '0.1.7-rc.2',
@@ -32,7 +34,6 @@ const REFUSED_HOSTS = [
   '0.2.1-rc.5',
   '0.2.2-alpha.3',
   '0.2.2-rc.1',
-  '0.2.2-rc.4',
   '0.2.2',
   '0.3.0',
 ] as const
@@ -63,8 +64,8 @@ describe('DSH peer ranges', () => {
     ])
   })
 
-  it('limits every DSH peer to the audited host versions', () => {
-    expect(new Set(dshPeers.map(([, range]) => range))).toEqual(new Set(['0.2.2-rc.2 || 0.2.2-rc.3']))
+  it('declares the 0.2.2 release-candidate corridor for every DSH peer', () => {
+    expect(new Set(dshPeers.map(([, range]) => range))).toEqual(new Set([PEER_RANGE]))
   })
 
   for (const host of SUPPORTED_HOSTS) {
@@ -83,12 +84,18 @@ describe('DSH peer ranges', () => {
     })
   }
 
+  it('keeps later 0.2.2 release candidates inside the peer corridor', () => {
+    for (const [name, range] of dshPeers) {
+      expect(admits('0.2.2-rc.6', range), `${name} range "${range}" must admit future 0.2.2 RCs`).toBe(true)
+    }
+  })
+
   it('keeps the @deepseek-ai devDependency cohort on one supported host', () => {
     const versions = new Set(
       Object.entries(manifest.devDependencies)
         .filter(([name]) => name.startsWith('@deepseek-ai/dsh-'))
         .map(([, version]) => version),
     )
-    expect(versions).toEqual(new Set([process.env.DSH_TEST_VERSION ?? '0.2.2-rc.3']))
+    expect(versions).toEqual(new Set([process.env.DSH_TEST_VERSION ?? '0.2.2-rc.5']))
   })
 })
