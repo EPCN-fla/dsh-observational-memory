@@ -5,6 +5,7 @@ export type ScriptedTurn = {
   toolCalls?: { id: string; name: string; arguments: string }[]
   text?: string
   finish?: 'stop' | 'tool-calls' | 'error' | 'max-tokens'
+  failure?: { message: string; code: string }
 }
 
 export function turnChunks(turn: ScriptedTurn): StreamChunk[] {
@@ -25,7 +26,7 @@ export function turnChunks(turn: ScriptedTurn): StreamChunk[] {
   }
   const kind = turn.finish ?? (turn.toolCalls?.length ? 'tool-calls' : 'stop')
   if (kind === 'error') {
-    chunks.push({ type: 'finish', reason: { kind: 'error', failure: { message: 'boom', code: 'X' } } })
+    chunks.push({ type: 'finish', reason: { kind: 'error', failure: turn.failure ?? { message: 'boom', code: 'X' } } })
   } else {
     chunks.push({ type: 'finish', reason: { kind } })
   }
